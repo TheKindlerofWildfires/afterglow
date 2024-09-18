@@ -1,7 +1,10 @@
 use std::{collections::HashMap, time::Duration};
 
 use crate::{
-    core::loss_list::LossBuffer, packet::data::DataPacket, utils::{MessageNumber, SequenceNumber, SequenceRange}, window::time_window::TimeWindow
+    core::loss_list::LossBuffer,
+    packet::data::DataPacket,
+    utils::{MessageNumber, SequenceNumber, SequenceRange},
+    window::time_window::TimeWindow,
 };
 
 use super::recv_buffer::RecvBuffer;
@@ -20,8 +23,8 @@ impl RecvList {
         let connections = HashMap::new();
         Self { connections }
     }
-    pub fn register_connection(&mut self, socket_id: u16, isn: SequenceNumber) {
-        let data_buffer = RecvBuffer::new(isn);
+    pub fn register_connection(&mut self, socket_id: u16, self_isn: SequenceNumber,partner_isn: SequenceNumber) {
+        let data_buffer = RecvBuffer::new(self_isn,partner_isn);
         let loss_buffer = LossBuffer::new();
         let time_window = TimeWindow::new();
         let backer = RecvBacker {
@@ -31,7 +34,7 @@ impl RecvList {
         };
         self.connections.insert(socket_id, backer);
     }
-    pub fn remove_connection(&mut self, socket_id: u16){
+    pub fn remove_connection(&mut self, socket_id: u16) {
         self.connections.remove(&socket_id);
     }
     pub fn add_data(&mut self, packet: DataPacket) {
@@ -59,11 +62,7 @@ impl RecvList {
             None => {}
         }
     }
-    pub fn report_loss(
-        &mut self,
-        socket_id: u16,
-        mss: u16,
-    ) -> Vec<SequenceRange> {
+    pub fn report_loss(&mut self, socket_id: u16, mss: u16) -> Vec<SequenceRange> {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => connection.loss_buffer.encode(mss),
             None => vec![],
@@ -93,7 +92,7 @@ impl RecvList {
             None => Duration::ZERO,
         }
     }
-    pub fn buffer_size(&self, socket_id: u16)->u16{
+    pub fn buffer_size(&self, socket_id: u16) -> u16 {
         match self.connections.get(&socket_id) {
             Some(connection) => connection.data_buffer.size() as u16,
             None => 0,
@@ -107,35 +106,46 @@ impl RecvList {
             None => {}
         }
     }
-    pub fn next_ack(&mut self, socket_id: u16) -> Option<SequenceNumber>{
+    pub fn next_ack(&mut self, socket_id: u16) -> Option<(SequenceNumber,SequenceNumber)> {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
-                match connection.loss_buffer.first(){
-                    Some(range) => Some(range.start),
-                    None => {
-                        let mut ack_no = connection.data_buffer.last_seq();
-                        ack_no.inc();
-                        Some(ack_no)
-                    },
-                }
+                let proposed_ack = match connection.loss_buffer.first() {
+                    Some(range) =>range.start,
+                    None => connection.data_buffer.next_ack()
+                };
+                connection.data_buffer.should_ack(proposed_ack)
             }
-            None => None
+            None => None,
         }
-
     }
-    pub fn inc_ack(&mut self, socket_id: u16) -> Option<SequenceNumber>{
+    pub fn sent_ack(&mut self, socket_id: u16,ack_no: SequenceNumber) {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                match connection.loss_buffer.first(){
-                    Some(range) => Some(range.start),
-                    None => {
-                        let ack_no = connection.data_buffer.inc_ack();
-                        Some(ack_no)
-                    },
-                }
-            }
-            None => None
+            Some(connection) => connection.data_buffer.sent_ack(ack_no),
+            None => {},
         }
-
+    }
+    pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => connection.data_buffer.ack_square(ack_no),
+            None => {}
+        }
+    }
+    pub fn loss(&mut self, socket_id: u16, loss_ranges: Vec<SequenceRange>) {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => connection.data_buffer.loss(loss_ranges),
+            None => {}
+        }
+    }
+    pub fn on_pkt(&mut self, socket_id: u16) {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => connection.data_buffer.on_pkt(),
+            None => {}
+        }
+    }
+    pub fn delay(&self, socket_id: u16) -> Duration {
+        match self.connections.get(&socket_id) {
+            Some(connection) => connection.data_buffer.delay(),
+            None => Duration::ZERO,
+        }
     }
 }

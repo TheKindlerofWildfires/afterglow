@@ -4,25 +4,41 @@ use std::{
 };
 
 use crate::{
+    core::SYN_INTERVAL,
     packet::data::{DataPacket, DataPacketType},
     utils::{MessageNumber, SequenceNumber, SequenceRange},
 };
 
 #[derive(Debug)]
 pub struct SendBuffer {
-    last_msg: MessageNumber,
-    last_seq: SequenceNumber,
+    last_msg: MessageNumber, //the last msg no created
+    last_seq: SequenceNumber, //the last seq no created
+    last_ack: SequenceNumber, // the last ack recv
+    last_ack_square: SequenceNumber, //the last ack square recv
+    last_ack_time: SystemTime,
+    last_ack_square_time: SystemTime,
     blocks: HashMap<SequenceNumber, SendBlock>,
     drops: HashMap<MessageNumber, Vec<SequenceNumber>>,
 }
 impl SendBuffer {
-    pub fn new(last_seq: SequenceNumber) -> Self {
+    pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
+        dbg!(self_isn,partner_isn);
+
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
         let drops = HashMap::new();
+        let last_seq = self_isn;
+        let last_ack = partner_isn;
+        let last_ack_square = last_ack;
+        let last_ack_time = SystemTime::now();
+        let last_ack_square_time = SystemTime::now();
         Self {
             last_seq,
             last_msg,
+            last_ack,
+            last_ack_square,
+            last_ack_time,
+            last_ack_square_time,
             blocks,
             drops,
         }
@@ -44,6 +60,8 @@ impl SendBuffer {
         let stamp = SystemTime::now();
 
         if count == 1 {
+            self.last_seq.inc();
+
             let packet = DataPacket::new(
                 self.last_seq,
                 self.last_msg,
@@ -53,7 +71,6 @@ impl SendBuffer {
                 partner_id,
                 data.to_vec(),
             );
-            self.last_seq.inc();
             self.last_msg.inc();
 
             return vec![packet];
@@ -62,6 +79,8 @@ impl SendBuffer {
             .chunks(mss as usize)
             .enumerate()
             .map(|(i, chunk)| {
+                self.last_seq.inc();
+
                 let element = if i == 0 {
                     DataPacketType::First
                 } else if i == count - 1 {
@@ -79,7 +98,6 @@ impl SendBuffer {
                     chunk.to_vec(),
                 );
 
-                self.last_seq.inc();
                 packet
             })
             .collect::<Vec<_>>();
@@ -87,7 +105,14 @@ impl SendBuffer {
         out
     }
 
-    pub fn add(&mut self, data: &[u8], ttl: Duration, order: bool, partner_id: u16, mss: u16) -> usize{
+    pub fn add(
+        &mut self,
+        data: &[u8],
+        ttl: Duration,
+        order: bool,
+        partner_id: u16,
+        mss: u16,
+    ) -> usize {
         let packets = self.create_packets(data, mss, order, partner_id);
         let len = packets.len();
         packets.into_iter().for_each(|packet| {
@@ -160,12 +185,38 @@ impl SendBuffer {
         }
     }
     pub fn search(&mut self, range: SequenceRange) -> Option<DataPacket> {
-        match self.blocks.iter().find(|(seq_no,_)|{
-            range.contains(**seq_no)
-        }){
-            Some((_,block)) => Some(block.packet.clone()),
+        match self
+            .blocks
+            .iter()
+            .find(|(seq_no, _)| range.contains(**seq_no))
+        {
+            Some((_, block)) => Some(block.packet.clone()),
             None => None,
         }
+    }
+    pub fn ack(&mut self, ack_no: SequenceNumber) -> bool {
+        //Remove blocks and drops from before this ack number
+        self.blocks
+            .retain(|seq_no, block| *seq_no > ack_no || block.state == BlockState::Fresh);
+        self.drops
+            .retain(|_, seqs| seqs.iter().fold(false, |acc, seq| acc || *seq > ack_no));
+        match self.last_ack_time.elapsed() {
+            Ok(time) => {
+                if time > SYN_INTERVAL || ack_no == self.last_ack {
+                    self.last_ack = ack_no;
+                    self.last_ack_time = SystemTime::now();
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub fn ack_square(&mut self, ack_no: SequenceNumber) {
+        self.last_ack_square = ack_no;
+        self.last_ack_square_time = SystemTime::now();
     }
 
     //To clean up when ready
@@ -178,8 +229,11 @@ impl SendBuffer {
     pub fn size(&self) -> usize {
         self.blocks.len()
     }
-    pub fn last_seq(&self)->SequenceNumber{
+    pub fn last_seq(&self) -> SequenceNumber {
         self.last_seq
+    }
+    pub fn last_ack(&self) -> SequenceNumber {
+        self.last_ack
     }
 }
 

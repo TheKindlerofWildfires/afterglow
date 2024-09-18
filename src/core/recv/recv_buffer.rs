@@ -1,30 +1,34 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{cmp::min, collections::HashMap, time::{Duration, SystemTime}};
 
 use crate::{
-    packet::data::{DataPacket, DataPacketType},
-    utils::{MessageNumber, SequenceNumber, SequenceRange},
+    congestion::CongestionController, core::SYN_INTERVAL, packet::data::{DataPacket, DataPacketType}, utils::{MessageNumber, SequenceNumber, SequenceRange}
 };
 
 //This structure only tracks data messages and outputs fully formed packets
 pub struct RecvBuffer {
-    last_seq: SequenceNumber,
-    last_ack: SequenceNumber,
-    last_ack_square: SequenceNumber,
+    last_msg: MessageNumber, //the last msg popped
+    last_seq: SequenceNumber, //the last seq processed
+    last_ack: SequenceNumber, //the last ack sent
+    last_ack_square: SequenceNumber, //the last ack square sent
     last_ack_time: SystemTime,
     last_ack_square_time: SystemTime,
-    last_msg: MessageNumber,
+    next_ack_time: SystemTime,
+    congestion: CongestionController,
     blocks: HashMap<MessageNumber, RecvBlock>,
 }
 
 impl RecvBuffer {
-    pub fn new(last_seq: SequenceNumber) -> Self {
+    pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
+        dbg!(self_isn,partner_isn);
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
-        let mut last_ack = last_seq;
-        last_ack.dec();
+        let last_seq = self_isn;
+        let last_ack = self_isn;
         let last_ack_square = last_ack;
         let last_ack_time = SystemTime::now();
         let last_ack_square_time = SystemTime::now();
+        let next_ack_time = SystemTime::now()+SYN_INTERVAL;
+        let congestion = CongestionController::new();
         Self {
             last_msg,
             last_seq,
@@ -32,7 +36,9 @@ impl RecvBuffer {
             last_ack,
             last_ack_square,
             last_ack_time,
-            last_ack_square_time
+            last_ack_square_time,
+            next_ack_time,
+            congestion
         }
     }
 
@@ -63,13 +69,10 @@ impl RecvBuffer {
             //Create a new message
             None => {
                 let state = BlockState::Partial;
-                let stamp = packet.stamp;
+                let _stamp = packet.stamp;
                 let data = vec![packet];
-                let mut recv_block = RecvBlock { stamp, data, state };
+                let mut recv_block = RecvBlock { _stamp, data, state };
                 recv_block.update_state();
-                if msg_no < self.last_msg {
-                    self.last_msg = msg_no;
-                }
                 self.blocks.insert(msg_no, recv_block);
             }
         }
@@ -89,6 +92,7 @@ impl RecvBuffer {
         let out = match complete_blocks.first_mut() {
             Some((msg_no, block)) => {
                 //check that this is the next message in the sequence
+
                 match **msg_no == self.last_msg {
                     true => {
                         let bytes = block.to_bytes();
@@ -100,6 +104,7 @@ impl RecvBuffer {
             }
             None => None,
         };
+
         match out {
             Some((msg_no, bytes)) => {
                 self.blocks.remove(&msg_no);
@@ -127,15 +132,77 @@ impl RecvBuffer {
     pub fn last_seq(&self)->SequenceNumber{
         self.last_seq
     }
-    pub fn inc_ack(&mut self)->SequenceNumber{
-        self.last_ack.inc();
-        self.last_ack
+    pub fn sent_ack(&mut self,ack_no:SequenceNumber){
+        if ack_no>self.last_ack{
+            self.last_ack = ack_no
+        }
+    }
+    pub fn next_ack(&mut self)->SequenceNumber{
+        self.last_seq
+    }
+    pub fn ack_square(&mut self, ack_no:SequenceNumber){
+        self.last_ack_square_time = SystemTime::now();
+        self.last_ack_square =  ack_no;
+    }
+    pub fn should_ack(&mut self,proposed_ack: SequenceNumber)->Option<(SequenceNumber,SequenceNumber)>{
+        dbg!("Called should ack",proposed_ack);
+        let should_ack = match self.next_ack_time.elapsed() {
+            Ok(elapse) => {
+                dbg!("case 1",elapse);
+                true
+            }
+            Err(err) => {
+                dbg!("case 2", err);
+                self.congestion.should_ack()
+            }
+        };
+        //If the time is wrong don't ack
+        if !should_ack{
+            return None;
+        }
+        //if we've confirmed this ack don't send it
+        if proposed_ack==self.last_ack_square{
+            return None;
+        }
+
+
+        //If this is a new ack or the last ack timed out
+        if proposed_ack>self.last_ack{
+            self.last_ack = proposed_ack;
+        }else if proposed_ack==self.last_ack{
+            let ack_timeout = match self.last_ack_time.elapsed(){
+                Ok(dur)=>dur<self.congestion.long_poll(),
+                Err(_)=>false 
+            };
+            if !ack_timeout{
+                return None
+            }
+        }else{
+            return None
+        }
+        if self.last_ack>self.last_ack_square{
+            self.next_ack_time = SystemTime::now()+self.congestion.next_ack();
+            return Some((proposed_ack,self.last_seq))
+        }
+        None
+    }
+    pub fn loss(&mut self, loss_ranges: Vec<SequenceRange>){
+        let loss_start = loss_ranges.iter().fold(SequenceNumber::MAX_SEQ_NO, |acc, range|{
+            min(range.start,acc)
+        });
+        self.congestion.on_loss(loss_start);
+    }
+    pub fn delay(&self)->Duration{
+        self.congestion.next_time()
+    }
+    pub fn on_pkt(&mut self){
+        self.congestion.inc_pkt_cnt();
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct RecvBlock {
-    stamp: SystemTime,
+    _stamp: SystemTime,
     data: Vec<DataPacket>,
     state: BlockState,
 }
@@ -182,6 +249,7 @@ impl RecvBlock {
         });
         DataPacket::decompress(&raw_bytes)
     }
+
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockState {

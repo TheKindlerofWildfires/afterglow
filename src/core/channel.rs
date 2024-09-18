@@ -78,9 +78,11 @@ impl NeonSocket {
             Ok(socket) => socket,
             Err(err) => return Err(err),
         };
-
+        /* 
+        //Rust does polling on sockets itself in blocking mode which is better than my loop
         //set nonblockng
 
+        
         match socket.set_nonblocking(true) {
             Ok(_) => {}
             Err(err) => return Err(err),
@@ -90,7 +92,7 @@ impl NeonSocket {
         match socket.set_read_timeout(Some(Duration::from_millis(100))) {
             Ok(_) => {}
             Err(err) => return Err(err),
-        }
+        }*/
 
         Ok(Self {
             addr,

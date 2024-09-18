@@ -1,15 +1,17 @@
 use std::{
-    net::SocketAddr, sync::{Arc, RwLock}, time::{Duration, SystemTime}
+    io::{Error, ErrorKind}, net::SocketAddr, sync::{Arc, Condvar, Mutex, RwLock}, time::{Duration, SystemTime}
 };
 
-use crate::{core::channel::NeonChannel, packet::Packet, utils::{SequenceNumber, SequenceRange}};
+use crate::{
+    core::channel::NeonChannel,
+    packet::Packet,
+    utils::{SequenceNumber, SequenceRange},
+};
 
 use super::send_list::SendList;
 
 pub struct SendQueue {
     list: Arc<RwLock<SendList>>,
-    channel: Arc<RwLock<NeonChannel>>,
-    closing: Arc<RwLock<bool>>,
 }
 
 /*
@@ -21,24 +23,19 @@ pub struct SendQueue {
 
 //I think this should have a 'neon in' and 'udp out' thread and reverse for recv if they can be made to work together
 impl SendQueue {
-    pub fn new(channel: Arc<RwLock<NeonChannel>>, closing: Arc<RwLock<bool>>) -> Self {
+    pub fn new() -> Self {
         let list = Arc::new(RwLock::new(SendList::new()));
-        Self {
-            list,
-            closing,
-            channel,
-        }
+        Self { list }
     }
-    pub fn close(&self) {
-        match self.closing.write() {
-            Ok(mut closing) => *closing = true,
-            Err(_) => {}
-        };
-    }
-    pub fn register_connection(&self, socket_id: u16, isn: SequenceNumber) {
+    pub fn register_connection(
+        &self,
+        socket_id: u16,
+        self_isn: SequenceNumber,
+        partner_isn: SequenceNumber,
+    ) {
         match self.list.write() {
-            Ok(mut binding) => binding.register_connection(socket_id, isn),
-            Err(_) => self.close(),
+            Ok(mut binding) => binding.register_connection(socket_id, self_isn, partner_isn),
+            Err(_) => {}
         }
     }
 
@@ -50,79 +47,88 @@ impl SendQueue {
         order: bool,
         partner_id: u16,
         mss: u16,
-    ) -> usize{
+    ) -> usize {
         match self.list.write() {
             Ok(mut binding) => binding.insert(socket_id, data, ttl, order, partner_id, mss),
             Err(_) => 0,
         }
     }
-    pub fn send_packet(&self, addr: SocketAddr, packet: Packet) {
-        match self.channel.read(){
-            Ok(binding)=>{
-                match binding.send_to(addr, packet) {
-                    Ok(_) => {}
-                    Err(_) => self.close()
-                }
-            },
-            Err(_)=>self.close()
-        }       
+    pub fn send_packet(&self, channel: &NeonChannel, addr: SocketAddr, packet: Packet)->Result<usize, Error> {
+        channel.send_to(addr, packet)
     }
-    pub fn send_data(&mut self, addr:SocketAddr, socket_id: u16){
-        let packet = match self.list.write(){
-            Ok(mut binding) => {
-                binding.pop(socket_id)
-
-            },
-            Err(_) => return,
+    pub fn send_data(&mut self, channel: &NeonChannel, addr: SocketAddr, socket_id: u16)->Result<usize, Error> {
+        let packet = match self.list.write() {
+            Ok(mut binding) => binding.pop(socket_id),
+            Err(_) => return Err(Error::new(ErrorKind::Interrupted, "Poisoned lock")),
         };
-        match packet{
-            Some(packet) =>  self.send_packet(addr, packet),
-            None => {},
+        match packet {
+            Some(packet) => self.send_packet(channel, addr, packet),
+            None => Ok(0)
         }
-       ;
     }
-    pub fn next_time(&self)->Option<(u16, Duration)>{
-        match self.list.write(){
-            Ok(mut list)=>{
-                list.next_time()
-            },
-            Err(_)=>None
+    pub fn next_time(&self) -> Option<(u16, Duration)> {
+        match self.list.write() {
+            Ok(mut list) => list.next_time(),
+            Err(_) => None,
         }
     }
     pub fn loss(&mut self, socket_id: u16, loss: SequenceRange) {
-        match self.list.write(){
-            Ok(mut list) => list.loss(socket_id,loss),
-            Err(_) => {},
+        match self.list.write() {
+            Ok(mut list) => list.loss(socket_id, loss),
+            Err(_) => {}
         }
     }
-    pub fn ack(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.list.write(){
+    pub fn ack(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
+        match self.list.write() {
             Ok(mut list) => {
-                if !list.out_of_sequence(socket_id,ack_no){
+                if !list.out_of_sequence(socket_id, ack_no) {
                     list.remove_confirmed(socket_id, ack_no);
+                    list.ack(socket_id, ack_no)
+                } else {
+                    false
                 }
             }
-            Err(_) => {},
+            Err(_) => false,
         }
     }
-    pub fn update(&mut self, socket_id: u16, schedule: SystemTime){
-        match self.list.write(){
-            Ok(mut list) => list.update(socket_id,schedule),
-            Err(_) => {},
+    pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
+        match self.list.write() {
+            Ok(mut list) => {
+                if !list.out_of_sequence_square(socket_id, ack_no) {
+                    list.ack_square(socket_id, ack_no);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    pub fn update(&mut self, socket_id: u16, cnt: usize, delay: Duration) {
+        match self.list.write() {
+            Ok(mut list) => list.update(socket_id, cnt,delay),
+            Err(_) => {}
         }
     }
 
-    /* 
+    /*
     pub fn drops(&self) -> Vec<SendBlock> {
         let mut list_lock = self.list.write().unwrap();
         list_lock.drops()
     }*/
-    pub fn remove(&mut self, socket_id: u16){
-        match self.list.write(){
-            Ok(mut binding) => {
-                binding.remove_connection(socket_id)
-            },
-            Err(_) => {},
+    pub fn remove(&mut self, socket_id: u16) {
+        match self.list.write() {
+            Ok(mut binding) => binding.remove_connection(socket_id),
+            Err(_) => {}
+        }
+    }
+    pub fn last_seq(&self, socket_id: u16)->Option<SequenceNumber>{
+        match self.list.write() {
+            Ok(mut binding) => binding.last_seq(socket_id),
+            Err(_) => None
+        }
+    }
+    pub fn poll(&self)->Option<Arc<(Condvar,Arc<Mutex<Vec<u16>>>)>>{
+        match self.list.read() {
+            Ok(binding) => Some(binding.poll()),
+            Err(_) => None
         }
     }
 }

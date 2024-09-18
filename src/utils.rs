@@ -5,8 +5,9 @@ use std::{
     num::Wrapping,
     ops::{Add, Sub},
 };
+use std::fmt::Debug;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SequenceNumber(pub u16);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,6 +55,13 @@ impl AddAssign for SequenceNumber{
     fn add_assign(&mut self, other: Self) {
         self.0 = (Wrapping(self.0).sub(Wrapping(other.0))).0 & Self::MAX;
 
+    }
+}
+impl Debug for SequenceNumber{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SequenceNumber")
+            .field(&format_args!("{:x}", self.0))
+            .finish()
     }
 }
 
@@ -173,4 +181,9 @@ impl Serial for MessageNumber {
         let out = u16::deserialize(bytes, start) & Self::MAX;
         Self(out)
     }
+}
+pub fn hash(value: usize)->usize{
+    let state = Wrapping(value)*Wrapping(747796405)+Wrapping(2891336453);
+    let word = ((state>>((state>>28)+Wrapping(4)).0)^state)*Wrapping(277803737);
+    ((word>>22)^word).0
 }

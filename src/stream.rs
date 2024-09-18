@@ -58,12 +58,8 @@ impl NeonStream {
         core: Arc<RwLock<NeonCore>>,
         new_socket_id: u16,
     ) -> Result<(), Error> {
-        dbg!("b");
-
         let mut count = 0;
         loop {
-            dbg!("c");
-
             let err = match core.write() {
                 Ok(mut core) => match core.handshake(ReqType::Connection, other, new_socket_id) {
                     Ok(()) => {

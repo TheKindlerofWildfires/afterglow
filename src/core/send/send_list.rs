@@ -1,5 +1,6 @@
 use std::{
     collections::{BinaryHeap, HashMap},
+    sync::{Arc, Condvar, Mutex},
     time::{Duration, SystemTime},
 };
 
@@ -13,6 +14,7 @@ use super::send_buffer::SendBuffer;
 
 pub struct SendList {
     connections: HashMap<u16, SendBacker>,
+    poll: Arc<(Condvar, Arc<Mutex<Vec<u16>>>)>,
 }
 #[derive(Debug)]
 struct SendBacker {
@@ -24,10 +26,18 @@ struct SendBacker {
 impl SendList {
     pub fn new() -> Self {
         let connections = HashMap::new();
-        Self { connections }
+        let waiting_sockets = Arc::new(Mutex::new(Vec::new()));
+        let work_condition = Condvar::new();
+        let poll = Arc::new((work_condition, waiting_sockets));
+        Self { connections, poll }
     }
-    pub fn register_connection(&mut self, socket_id: u16, isn: SequenceNumber) {
-        let data_buffer = SendBuffer::new(isn);
+    pub fn register_connection(
+        &mut self,
+        socket_id: u16,
+        self_isn: SequenceNumber,
+        partner_isn: SequenceNumber,
+    ) {
+        let data_buffer = SendBuffer::new(self_isn, partner_isn);
         let loss_buffer = LossBuffer::new();
         let updates = BinaryHeap::new();
         let backer = SendBacker {
@@ -49,19 +59,33 @@ impl SendList {
         order: bool,
         partner_id: u16,
         mss: u16,
-    ) ->usize {
+    ) -> usize {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => connection
                 .data_buffer
                 .add(data, ttl, order, partner_id, mss),
-            None => 0
+            None => 0,
         }
     }
     //Wrapper for updating time
-    pub fn update(&mut self, socket_id: u16, time: SystemTime) {
+    pub fn update(&mut self, socket_id: u16, cnt: usize, delay: Duration) {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
-                connection.updates.push(time);
+                (0..cnt).for_each(|i| {
+                    connection
+                        .updates
+                        .push(SystemTime::now() + delay * (i + 1) as u32);
+                });
+                //This socket is now waiting to be worked
+                match self.poll.1.lock() {
+                    Ok(mut waiting) => {
+                        (0..cnt).for_each(|_|{
+                            waiting.push(socket_id)
+                        });
+                    },
+                    Err(_) => {}
+                };
+                self.poll.0.notify_all();
             }
             None => {}
         }
@@ -112,6 +136,12 @@ impl SendList {
             None => false,
         }
     }
+    pub fn out_of_sequence_square(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => connection.data_buffer.last_ack() < ack_no,
+            None => false,
+        }
+    }
     pub fn remove_confirmed(&mut self, socket_id: u16, ack_no: SequenceNumber) {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
@@ -120,35 +150,51 @@ impl SendList {
             None => {}
         }
     }
+    pub fn ack(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => connection.data_buffer.ack(ack_no),
+            None => false,
+        }
+    }
+    pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => {
+                connection.data_buffer.ack_square(ack_no);
+            }
+            None => {}
+        }
+    }
 
+    //Can't lock here, need to keep this open
+    pub fn poll(&self) -> Arc<(Condvar, Arc<Mutex<Vec<u16>>>)> {
+        self.poll.clone()
+    }
     pub fn next_time(&mut self) -> Option<(u16, Duration)> {
+        //condvar wait for something in the queue
         let result = self
             .connections
             .iter()
             .fold(None, |acc, (c_sock, c_conn)| match acc {
-                Some((_, acc_delay)) => {
-                    match c_conn.updates.peek() {
-                        Some(time) => match time.duration_since(SystemTime::now()) {
-                            Ok(delay) => {
-                                if delay < acc_delay {
-                                    Some((*c_sock, delay))
-                                } else {
-                                    acc
-                                }
+                Some((_, acc_delay)) => match c_conn.updates.peek() {
+                    Some(time) => match time.duration_since(SystemTime::now()) {
+                        Ok(delay) => {
+                            if delay < acc_delay {
+                                Some((*c_sock, delay))
+                            } else {
+                                acc
                             }
-                            Err(_) => Some((*c_sock, Duration::ZERO)),
-                        },
-                        None => acc,
-                    }
-                }
-                None => {
-                    match c_conn.updates.peek() {
+                        }
+                        Err(_) => Some((*c_sock, Duration::ZERO)),
+                    },
+                    None => acc,
+                },
+                None => match c_conn.updates.peek() {
                     Some(time) => match time.duration_since(SystemTime::now()) {
                         Ok(delay) => Some((*c_sock, delay)),
                         Err(_) => Some((*c_sock, Duration::ZERO)),
                     },
                     None => None,
-                }},
+                },
             });
         match result {
             Some((socket_id, delay)) => {
@@ -163,13 +209,30 @@ impl SendList {
     }
     pub fn pop_time(&mut self, socket_id: u16) -> Option<Duration> {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => match connection.updates.pop() {
-                Some(time) => match time.duration_since(SystemTime::now()) {
-                    Ok(delay) => Some(delay),
-                    Err(_) => None,
-                },
-                None => None,
-            },
+            Some(connection) => {
+                //Remove the first count of this socket from the queue
+                match self.poll.1.lock() {
+                    Ok(mut waiting) => {
+                        if let Some(pos) = waiting.iter().position(|&x| x == socket_id) {
+                            waiting.remove(pos);
+                        }
+                    }
+                    Err(_) => {}
+                };
+                match connection.updates.pop() {
+                    Some(time) => match time.duration_since(SystemTime::now()) {
+                        Ok(delay) => Some(delay),
+                        Err(_) => None,
+                    },
+                    None => None,
+                }
+            }
+            None => None,
+        }
+    }
+    pub fn last_seq(&self, socket_id: u16) -> Option<SequenceNumber> {
+        match self.connections.get(&socket_id) {
+            Some(connection) => Some(connection.data_buffer.last_seq()),
             None => None,
         }
     }

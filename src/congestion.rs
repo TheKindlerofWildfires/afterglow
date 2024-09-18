@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     core::{channel::MAX_PACKET_SIZE, SYN_INTERVAL},
-    utils::SequenceNumber,
+    utils::{self, SequenceNumber},
 };
 
 #[derive(Debug)]
@@ -15,6 +15,7 @@ pub struct CongestionController {
     cur_send_seq_no: SequenceNumber,
     recv_rate: usize, //packets per second
     rtt: Duration,
+    rtt_var: Duration,
     ack_interval: usize,
     ack_period: Duration,
     rc_interval: Duration,
@@ -41,6 +42,7 @@ impl CongestionController {
         let cur_send_seq_no = SequenceNumber::MAX_SEQ_NO;
         let recv_rate = 16;
         let rtt = Duration::from_micros(10);
+        let rtt_var = Duration::from_micros(1);
         let ack_period = Duration::ZERO;
         let ack_interval = 0;
         let rc_interval = Duration::from_micros(10_000);
@@ -64,6 +66,7 @@ impl CongestionController {
             cur_send_seq_no,
             recv_rate,
             rtt,
+            rtt_var,
             ack_period,
             ack_interval,
             rc_interval,
@@ -151,6 +154,9 @@ impl CongestionController {
     pub fn inc_pkt_cnt(&mut self){
         self.pkt_count+=1;
     }
+    pub fn long_poll(&self)->Duration{
+        self.rtt+self.rtt_var*4
+    }
     pub fn on_loss(&mut self, loss_start: SequenceNumber){
         if self.slow_start{
             self.slow_start = false;
@@ -168,7 +174,7 @@ impl CongestionController {
             self.loss_count+=1;
             self.dec_count+=1;
             self.last_dec_seq_no = self.cur_send_seq_no;
-            self.dec_random = Self::hash(self.last_dec_seq_no.0 as usize)/usize::MAX;
+            self.dec_random = utils::hash(self.last_dec_seq_no.0 as usize)/usize::MAX;
             if self.dec_random < 1{
                 self.dec_random = 1;
             }
@@ -187,10 +193,5 @@ impl CongestionController {
     pub fn next_time(&self)->Duration{
         self.pkt_send_period
     }
-    fn hash(value: usize)->usize{
-        let state = value*747796405+2891336453;
-        let word = ((state>>((state>>28)+4))^state)*277803737;
-        (word>>22)^word
 
-    }
 }

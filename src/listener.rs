@@ -20,15 +20,16 @@ impl NeonListener {
     pub fn accept(&mut self) -> Result<NeonStream, Error> {
         loop {
             //check if there is a queued stream
+            let thread_core = self.core.clone();
             match self.core.write(){
-                Ok(mut core) => match core.next_stream() {
+                Ok(mut core) => match core.next_stream(thread_core) {
                     Some(stream) => {return Ok(stream);},
                     None => {}
                 },
                 Err(_) => return Err(Error::new(ErrorKind::Interrupted, "Poisoned")),
             }
             //TODO condvar
-            thread::sleep(Duration::from_millis(1000));
+            thread::sleep(Duration::from_millis(100));
         }
     }
     pub fn incoming(&mut self) {
