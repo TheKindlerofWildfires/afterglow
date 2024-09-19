@@ -149,7 +149,6 @@ impl Serial for SequenceRange {
 
 impl MessageNumber {
     const MAX: u16 = 0x1fff;
-    const ROT: u16 = 0xfff;
     pub const ZERO: Self = Self(0);
     pub fn new(base: u16) -> Self {
         Self(base & Self::MAX)

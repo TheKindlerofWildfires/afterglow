@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    packet::data::DataPacket,
+    packet::{control::ack::Ack, data::DataPacket},
     utils::{MessageNumber, SequenceNumber, SequenceRange},
 };
 
@@ -30,9 +30,14 @@ impl RecvQueue {
         let list = Arc::new(RwLock::new(RecvList::new()));
         Self { list }
     }
-    pub fn register_connection(&self, socket_id: u16, self_isn: SequenceNumber,partner_isn: SequenceNumber) {
+    pub fn register_connection(
+        &self,
+        socket_id: u16,
+        self_isn: SequenceNumber,
+        partner_isn: SequenceNumber,
+    ) {
         match self.list.write() {
-            Ok(mut binding) => binding.register_connection(socket_id, self_isn,partner_isn),
+            Ok(mut binding) => binding.register_connection(socket_id, self_isn, partner_isn),
             Err(_) => {}
         }
     }
@@ -77,13 +82,18 @@ impl RecvQueue {
         }
     }
 
-    pub fn time_data(&self, socket_id: u16) -> Option<(u16, Duration, Duration)> {
+    pub fn time_data(&self, socket_id: u16) -> Option<(Duration, Duration, usize, usize, usize)> {
         match self.list.read() {
-            Ok(binding) => Some((
-                binding.buffer_size(socket_id),
-                binding.recv_speed(socket_id),
-                binding.bandwidth(socket_id),
-            )),
+            Ok(binding) => {
+                let (rtt, rtt_var) = binding.rtt(socket_id);
+                Some((
+                    rtt,
+                    rtt_var,
+                    binding.buffer_size(socket_id),
+                    binding.recv_speed(socket_id),
+                    binding.bandwidth(socket_id),
+                ))
+            }
             Err(_) => None,
         }
     }
@@ -124,6 +134,14 @@ impl RecvQueue {
         match self.list.write() {
             Ok(mut list) => {
                 list.on_pkt(socket_id);
+            }
+            Err(_) => {}
+        }
+    }
+    pub fn on_ack(&mut self, socket_id: u16, ack_no: SequenceNumber, ack: Ack) {
+        match self.list.write() {
+            Ok(mut list) => {
+                list.on_ack(socket_id, ack_no, ack);
             }
             Err(_) => {}
         }

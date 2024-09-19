@@ -22,13 +22,11 @@ pub struct SendBuffer {
 }
 impl SendBuffer {
     pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
-        dbg!(self_isn,partner_isn);
-
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
         let drops = HashMap::new();
         let last_seq = self_isn;
-        let last_ack = partner_isn;
+        let last_ack = self_isn;
         let last_ack_square = last_ack;
         let last_ack_time = SystemTime::now();
         let last_ack_square_time = SystemTime::now();
@@ -234,6 +232,17 @@ impl SendBuffer {
     }
     pub fn last_ack(&self) -> SequenceNumber {
         self.last_ack
+    }
+    pub fn keep_alive(&self) ->Option<SequenceRange>{
+        dbg!(self.last_seq, self.last_ack);
+        if self.last_seq != self.last_ack {
+            Some(SequenceRange{
+                start: self.last_ack,
+                stop: self.last_seq,
+            })
+        }else{
+            None
+        }
     }
 }
 

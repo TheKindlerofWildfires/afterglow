@@ -8,7 +8,6 @@ use std::{
     num::Wrapping,
     sync::Arc,
     sync::Mutex,
-    time::Duration,
 };
 
 pub const MAX_PACKET_SIZE: u16 = 128;

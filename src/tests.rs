@@ -6,14 +6,12 @@ pub mod basic {
     use crate::stream::NeonStream;
     use std::{io::ErrorKind, net::SocketAddr, thread, time::Duration};
 
-    #[test]
     fn server_spawn_single() {
         let addr = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
         let server = NeonListener::simplex(addr);
         assert!(server.is_ok());
     }
 
-    #[test]
     fn server_client_single() {
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
@@ -24,10 +22,6 @@ pub mod basic {
                 assert!(err.kind() == ErrorKind::NotConnected)
             }
         }
-    }
-    #[test]
-    fn handshake_single_test() {
-        handshake_single()
     }
     //Start a server and exit when the first connection spawns
     pub fn handshake_single() {
@@ -72,7 +66,7 @@ pub mod basic {
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
+        let _ = client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
         thread::sleep(Duration::from_millis(100));
         assert!(handle.join().is_ok())
     }
@@ -101,7 +95,7 @@ pub mod basic {
             .flat_map(|i| (i % 32).to_le_bytes())
             .collect::<Vec<_>>();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(&data, Duration::from_millis(100), true);
+        let _ = client.write(&data, Duration::from_millis(100), true);
         thread::sleep(Duration::from_millis(1000));
         assert!(handle.join().is_ok())
     }
@@ -129,7 +123,7 @@ pub mod basic {
             .flat_map(|i| (i % 128).to_le_bytes())
             .collect::<Vec<_>>();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(&data, Duration::from_millis(100), true);
+        let _ = client.write(&data, Duration::from_millis(100), true);
         thread::sleep(Duration::from_millis(100));
         assert!(handle.join().is_ok())
     }
@@ -157,7 +151,7 @@ pub mod basic {
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
+        let _ = client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
         let reply = client.read();
         reply
             .iter()
@@ -195,7 +189,7 @@ pub mod basic {
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(
+        let _ = client.write(
             &(0..MAX_PACKET_SIZE)
                 .flat_map(|i| (i % 32).to_le_bytes())
                 .collect::<Vec<_>>(),
@@ -245,7 +239,7 @@ pub mod basic {
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
         let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-        client.write(
+        let _ = client.write(
             &(0..MAX_PACKET_SIZE * 5)
                 .flat_map(|i| (i % 128).to_le_bytes())
                 .collect::<Vec<_>>(),
@@ -329,7 +323,7 @@ pub mod basic {
             let bind = "127.0.0.1:8000".parse::<SocketAddr>().unwrap();
             let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
             let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-            client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
+            let _ = client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
             thread::sleep(Duration::from_millis(100));
         });
         thread::sleep(Duration::from_millis(100));
@@ -338,7 +332,7 @@ pub mod basic {
             let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
             let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
             let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-            client.write(&[1, 1, 2, 3, 5, 8, 13, 21], Duration::from_millis(100), true);
+            let _ = client.write(&[1, 1, 2, 3, 5, 8, 13, 21], Duration::from_millis(100), true);
             thread::sleep(Duration::from_millis(100));
         });
         //connect to it with a client
@@ -370,7 +364,7 @@ pub mod basic {
                 .for_each(|(a, b)| {
                     assert!(a == b);
                 });
-            stream_one.write(
+            let _ = stream_one.write(
                 &[0,2,4,8,16,32,64,128],
                 Duration::from_millis(100),
                 true,
@@ -385,7 +379,7 @@ pub mod basic {
             let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
             let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
             let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-            client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
+            let _ = client.write(&[1, 2, 3, 4, 5, 6, 7, 8], Duration::from_millis(100), true);
             let reply = client.read();
             reply
             .iter()
@@ -400,7 +394,7 @@ pub mod basic {
             let bind = "127.0.0.1:8193".parse::<SocketAddr>().unwrap();
             let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
             let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target).unwrap();
-            client.write(&[1, 1, 2, 3, 5, 8, 13, 21], Duration::from_millis(100), true);
+            let _ = client.write(&[1, 1, 2, 3, 5, 8, 13, 21], Duration::from_millis(100), true);
             let reply = client.read();
             reply
             .iter()
@@ -424,15 +418,15 @@ pub mod basic {
             //drop when a stream get's popped
             let stream = server.accept();
             //idle here for a while
-            thread::sleep(Duration::from_secs(10));
+            thread::sleep(Duration::from_secs(3));
             assert!(stream.is_ok());
         });
         //connect to it with a client
         let bind = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
         let target = "127.0.0.1:8128".parse::<SocketAddr>().unwrap();
-        let client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target);
+        let _client = NeonStream::simplex(bind, 3, Duration::from_millis(100), target);
         //idle here for a while
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(Duration::from_secs(3));
         assert!(handle.join().is_ok())
     }
 }

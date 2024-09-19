@@ -17,7 +17,6 @@ pub struct CongestionController {
     rtt: Duration,
     rtt_var: Duration,
     ack_interval: usize,
-    ack_period: Duration,
     rc_interval: Duration,
     last_rc_time: SystemTime,
     slow_start: bool,
@@ -43,7 +42,6 @@ impl CongestionController {
         let recv_rate = 16;
         let rtt = Duration::from_micros(10);
         let rtt_var = Duration::from_micros(1);
-        let ack_period = Duration::ZERO;
         let ack_interval = 0;
         let rc_interval = Duration::from_micros(10_000);
         let last_rc_time = SystemTime::now();
@@ -67,7 +65,6 @@ impl CongestionController {
             recv_rate,
             rtt,
             rtt_var,
-            ack_period,
             ack_interval,
             rc_interval,
             last_rc_time,
@@ -192,6 +189,27 @@ impl CongestionController {
     }
     pub fn next_time(&self)->Duration{
         self.pkt_send_period
+    }
+    pub fn update_rtt(&mut self, rtt: u16){
+        let rtt = rtt as i32;
+        let mut self_rtt = self.rtt.as_millis() as i32;
+        let mut self_rtt_var = self.rtt_var.as_millis() as i32;
+        self_rtt_var = (self_rtt_var*3+(rtt-self_rtt).abs())>>2;
+        self_rtt = (self_rtt*7+rtt)>>3;
+
+
+        self.rtt = Duration::from_millis(self_rtt as u64);
+        self.rtt_var = Duration::from_millis(self_rtt_var as u64);
+    }
+
+    pub fn update_recv_rate(&mut self, recv_rate: u16){
+        self.recv_rate = (self.recv_rate*7+recv_rate as usize +4)>>3;
+    }
+    pub fn update_bandwidth(&mut self, bandwidth: u16){
+        self.recv_rate = (self.bandwidth*7+bandwidth as usize+4)>>3;
+    }
+    pub fn rtt(&self)->(Duration,Duration){
+        (self.rtt, self.rtt_var)
     }
 
 }

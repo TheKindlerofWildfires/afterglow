@@ -236,4 +236,19 @@ impl SendList {
             None => None,
         }
     }
+
+    pub fn keep_alive(&mut self,socket_id: u16)->bool{
+        match self.connections.get_mut(&socket_id) {
+            Some(connection) => {
+                match connection.data_buffer.keep_alive(){
+                    Some(seq_range)=>{
+                        connection.loss_buffer.insert(seq_range);
+                        self.poll.0.notify_all();
+                        false
+                    },
+                    None=>true
+                }
+            },
+            None => false,
+        }    }
 }

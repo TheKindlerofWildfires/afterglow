@@ -6,10 +6,9 @@ use std::{
 };
 
 use crate::{
-    congestion::CongestionController,
-    core::{channel::NeonChannel, NeonStatus, SYN_INTERVAL},
+    core::{NeonStatus, SYN_INTERVAL},
     packet::{
-        control::{ack::Ack, ControlPacket, ControlType},
+        control::ControlPacket,
         Packet,
     },
     utils::{MessageNumber, SequenceNumber, SequenceRange},
@@ -28,9 +27,6 @@ pub struct NeonConnection {
     first_update: SystemTime, //this is for relative time processing
     closing: Arc<RwLock<bool>>,
     expiration_counter: usize,
-    rtt: Duration,
-    rtt_var: Duration,
-    //congestion: CongestionController,
 }
 const MIN_EXPIRATION: usize = 300000;
 
@@ -48,11 +44,7 @@ impl NeonConnection {
         let last_update = SystemTime::now();
         let first_update = SystemTime::now();
         let closing = Arc::new(RwLock::new(false));
-        //let congestion = CongestionController::new();
-
-        let expiration_counter = 1;
-        let rtt = SYN_INTERVAL * 10;
-        let rtt_var = Duration::from_micros(rtt.as_micros() as u64 >> 1);
+        let expiration_counter =1;
         let out = Self {
             isn,
             status,
@@ -64,9 +56,7 @@ impl NeonConnection {
             last_update,
             first_update,
             closing,
-            expiration_counter,
-            rtt,
-            rtt_var,
+            expiration_counter
         };
         out
     }
@@ -83,20 +73,21 @@ impl NeonConnection {
         self.isn
     }
     
-    pub fn manage_keep_alive(&mut self)->bool{
+    pub fn should_keep_alive(&mut self,rtt:Duration, rtt_var: Duration)->bool{
         let mut exp_int = (self.expiration_counter
-            * (self.rtt.as_micros() + 4 * self.rtt_var.as_micros()) as usize)
+            * (rtt.as_micros() + 4 * rtt_var.as_micros()) as usize)
             + SYN_INTERVAL.as_micros() as usize;
         if exp_int < self.expiration_counter * MIN_EXPIRATION {
             exp_int = self.expiration_counter * MIN_EXPIRATION
         }
+        dbg!(Duration::from_micros(exp_int as u64).as_millis());
         let next_expiration_time = self.last_update + Duration::from_micros(exp_int as u64);
+        dbg!(exp_int);
+        self.expiration_counter+=1;
         match next_expiration_time.elapsed() {
             Ok(timeout) => {
                 //if it's dead close the socket
                 if self.expiration_counter > 16 && timeout > Duration::from_micros(500000) {
-                    //self.congestion.on_timeout();
-                    //TODO
                     *self.closing.write().unwrap() = true;
                     self.status = NeonStatus::Unhealthy(0x0001);
                     false
@@ -107,23 +98,26 @@ impl NeonConnection {
             Err(_) => {false} //the time is just in the future
         }
     }
+    
     pub fn create_ack(
         &mut self,
         ack_no: SequenceNumber,
         seq_no: SequenceNumber,
+        rtt: Duration,
+        rtt_var: Duration,
         buffer_size: u16,
-        window: Duration,
-        bandwidth: Duration,
+        window: usize,
+        bandwidth: usize,
     ) -> (SocketAddr, Packet) {
         let packet = Packet::Control(ControlPacket::ack(
             self.partner_id,
             ack_no,
             seq_no,
-            self.rtt.as_millis() as u16,
-            self.rtt_var.as_millis() as u16,
+            rtt.as_millis() as u16,
+            rtt_var.as_millis() as u16,
             buffer_size,
-            window.as_millis() as u16,
-            bandwidth.as_millis() as u16,
+            window as u16,
+            bandwidth as u16,
         ));
         (self.partner_in_addr, packet)
     }
@@ -180,7 +174,9 @@ impl NeonConnection {
 
     pub fn validate(&mut self, addr: SocketAddr) -> bool {
         if self.partner_in_addr == addr {
+            dbg!("Got in a packet, validating and resetting time");
             self.last_update = SystemTime::now();
+            self.expiration_counter=1;
             true
         } else {
             false

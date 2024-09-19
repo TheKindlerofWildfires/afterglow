@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Duration};
 
 use crate::{
     core::loss_list::LossBuffer,
-    packet::data::DataPacket,
+    packet::{control::ack::Ack, data::DataPacket},
     utils::{MessageNumber, SequenceNumber, SequenceRange},
     window::time_window::TimeWindow,
 };
@@ -80,21 +80,21 @@ impl RecvList {
             None => {}
         }
     }
-    pub fn recv_speed(&self, socket_id: u16) -> Duration {
+    pub fn recv_speed(&self, socket_id: u16) -> usize {
         match self.connections.get(&socket_id) {
             Some(connection) => connection.time_window.receive_speed(),
-            None => Duration::ZERO,
+            None => 0,
         }
     }
-    pub fn bandwidth(&self, socket_id: u16) -> Duration {
+    pub fn bandwidth(&self, socket_id: u16) -> usize {
         match self.connections.get(&socket_id) {
             Some(connection) => connection.time_window.bandwidth(),
-            None => Duration::ZERO,
+            None => 0,
         }
     }
-    pub fn buffer_size(&self, socket_id: u16) -> u16 {
+    pub fn buffer_size(&self, socket_id: u16) -> usize {
         match self.connections.get(&socket_id) {
-            Some(connection) => connection.data_buffer.size() as u16,
+            Some(connection) => connection.data_buffer.size(),
             None => 0,
         }
     }
@@ -146,6 +146,27 @@ impl RecvList {
         match self.connections.get(&socket_id) {
             Some(connection) => connection.data_buffer.delay(),
             None => Duration::ZERO,
+        }
+    }
+    pub fn on_ack(&mut self, socket_id: u16,ack_no: SequenceNumber, ack:Ack){
+        match self.connections.get_mut(&socket_id){
+            Some(connection) => {
+                connection.data_buffer.update_rtt(ack.rtt);
+                connection.data_buffer.update_recv_rate(ack.window);
+                connection.data_buffer.update_bandwidth(ack.bandwidth);
+                connection.data_buffer.on_ack(ack_no);
+
+            },
+            None => {},
+        }
+    }
+    pub fn rtt(&self,socket_id: u16)->(Duration,Duration){
+        match self.connections.get(&socket_id){
+            Some(connection) => {
+                connection.data_buffer.rtt()
+
+            },
+            None => (Duration::ZERO,Duration::ZERO),
         }
     }
 }

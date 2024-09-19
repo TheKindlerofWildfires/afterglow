@@ -3,8 +3,8 @@ pub struct TimeWindow {
     min_send_interval: Duration,
     last_packet: SystemTime,
     last_probe: SystemTime,
-    packet_windows: Vec<Duration>,
-    probe_windows: Vec<Duration>,
+    packet_windows: Vec<usize>,
+    probe_windows: Vec<usize>,
     packet_size: usize,
     probe_size: usize,
     packet_index: usize,
@@ -39,9 +39,9 @@ impl TimeWindow {
         self.min_send_interval =
             Duration::from_micros((self.min_send_interval.as_micros() as f64 * factor) as u64);
     }
-    pub fn receive_speed(&self) -> Duration {
+    pub fn receive_speed(&self) -> usize {
         if self.packet_windows.len()==0{
-            return Duration::ZERO
+            return 0
         }
         let mut replica = self.packet_windows.clone();
         replica.sort_unstable();
@@ -61,17 +61,17 @@ impl TimeWindow {
             .expect("Invariant in median failed");
         let count = stop - start;
         if count < MEDIAN_LIMIT {
-            Duration::ZERO
+            0
         } else {
             let sum = replica[start..stop]
                 .iter()
-                .fold(Duration::ZERO, |acc, rep| acc + *rep);
-            sum / count.try_into().unwrap()
+                .fold(0, |acc, rep| acc + *rep);
+            sum / count
         }
     }
-    pub fn bandwidth(&self) -> Duration {
+    pub fn bandwidth(&self) -> usize {
         if self.probe_windows.len()==0{
-            return Duration::ZERO
+            return 0
         }
         let mut replica = self.probe_windows.clone();
         replica.sort_unstable();
@@ -91,12 +91,12 @@ impl TimeWindow {
             .expect("Invariant in median failed");
         let count = stop - start;
         if count < MEDIAN_LIMIT {
-            Duration::ZERO
+            0
         } else {
             let sum = replica[start..stop]
                 .iter()
-                .fold(Duration::ZERO, |acc, rep| acc + *rep);
-            sum / count.try_into().unwrap()
+                .fold(0, |acc, rep| acc + *rep);
+            sum / count
         }
     }
     pub fn on_packet_sent(&mut self, send_time: SystemTime) {
@@ -112,10 +112,11 @@ impl TimeWindow {
         let time = SystemTime::now();
         match time.duration_since(self.last_packet) {
             Ok(duration) => {
+                let dur = duration.as_millis() as usize;
                 if self.packet_windows.len() < self.packet_size {
-                    self.packet_windows.push(duration)
+                    self.packet_windows.push(dur)
                 } else {
-                    self.packet_windows[self.packet_index] = duration;
+                    self.packet_windows[self.packet_index] = dur;
                     self.packet_index = (self.packet_index + 1) % self.packet_size;
                 }
             }
@@ -129,10 +130,11 @@ impl TimeWindow {
         let time = SystemTime::now();
         match time.duration_since(self.last_packet) {
             Ok(duration) => {
+                let dur = duration.as_millis() as usize;
                 if self.probe_windows.len() < self.probe_size {
-                    self.probe_windows.push(duration)
+                    self.probe_windows.push(dur)
                 } else {
-                    self.probe_windows[self.probe_index] = duration;
+                    self.probe_windows[self.probe_index] = dur;
                     self.probe_index = (self.probe_index + 1) % self.probe_size;
                 }
             }

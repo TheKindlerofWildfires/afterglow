@@ -1,5 +1,5 @@
 use std::{
-    io::{Error, ErrorKind}, net::SocketAddr, sync::{Arc, Condvar, Mutex, RwLock}, time::{Duration, SystemTime}
+    io::{Error, ErrorKind}, net::SocketAddr, sync::{Arc, Condvar, Mutex, RwLock}, time::Duration
 };
 
 use crate::{
@@ -120,8 +120,8 @@ impl SendQueue {
         }
     }
     pub fn last_seq(&self, socket_id: u16)->Option<SequenceNumber>{
-        match self.list.write() {
-            Ok(mut binding) => binding.last_seq(socket_id),
+        match self.list.read() {
+            Ok(binding) => binding.last_seq(socket_id),
             Err(_) => None
         }
     }
@@ -129,6 +129,14 @@ impl SendQueue {
         match self.list.read() {
             Ok(binding) => Some(binding.poll()),
             Err(_) => None
+        }
+    }
+    pub fn keep_alive(&self,socket_id: u16)->bool{
+        match self.list.write(){
+            Ok(mut binding)=>{
+                binding.keep_alive(socket_id)
+            },
+            Err(_)=>false
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::{cmp::min, collections::HashMap, time::{Duration, SystemTime}};
 
 use crate::{
-    congestion::CongestionController, core::SYN_INTERVAL, packet::data::{DataPacket, DataPacketType}, utils::{MessageNumber, SequenceNumber, SequenceRange}
+    congestion::CongestionController, core::SYN_INTERVAL, packet::data::{DataPacket, DataPacketType}, utils::{MessageNumber, SequenceNumber, SequenceRange}, window::ack_window::Window
 };
 
 //This structure only tracks data messages and outputs fully formed packets
@@ -13,6 +13,7 @@ pub struct RecvBuffer {
     last_ack_time: SystemTime,
     last_ack_square_time: SystemTime,
     next_ack_time: SystemTime,
+    ack_window: Window,
     congestion: CongestionController,
     blocks: HashMap<MessageNumber, RecvBlock>,
 }
@@ -29,6 +30,7 @@ impl RecvBuffer {
         let last_ack_square_time = SystemTime::now();
         let next_ack_time = SystemTime::now()+SYN_INTERVAL;
         let congestion = CongestionController::new();
+        let ack_window = Window::new(Duration::from_millis(2000));
         Self {
             last_msg,
             last_seq,
@@ -38,6 +40,7 @@ impl RecvBuffer {
             last_ack_time,
             last_ack_square_time,
             next_ack_time,
+            ack_window,
             congestion
         }
     }
@@ -136,23 +139,26 @@ impl RecvBuffer {
         if ack_no>self.last_ack{
             self.last_ack = ack_no
         }
+        self.ack_window.store(ack_no, ack_no)
     }
     pub fn next_ack(&mut self)->SequenceNumber{
         self.last_seq
     }
     pub fn ack_square(&mut self, ack_no:SequenceNumber){
         self.last_ack_square_time = SystemTime::now();
-        self.last_ack_square =  ack_no;
+        if ack_no>self.last_ack_square{
+            self.last_ack_square =  ack_no;
+        }
+        let mut _discard = SequenceNumber::new(0);
+        let rtt = self.ack_window.acknowledge(ack_no, &mut _discard);
+        self.congestion.update_rtt(rtt.as_millis() as u16);
     }
     pub fn should_ack(&mut self,proposed_ack: SequenceNumber)->Option<(SequenceNumber,SequenceNumber)>{
-        dbg!("Called should ack",proposed_ack);
         let should_ack = match self.next_ack_time.elapsed() {
             Ok(elapse) => {
-                dbg!("case 1",elapse);
                 true
             }
             Err(err) => {
-                dbg!("case 2", err);
                 self.congestion.should_ack()
             }
         };
@@ -197,6 +203,21 @@ impl RecvBuffer {
     }
     pub fn on_pkt(&mut self){
         self.congestion.inc_pkt_cnt();
+    }
+    pub fn rtt(&self)->(Duration,Duration){
+        self.congestion.rtt()
+    }
+    pub fn update_rtt(&mut self, rtt: u16){
+        self.congestion.update_rtt(rtt)
+    }
+    pub fn update_recv_rate(&mut self, rate: u16){
+        self.congestion.update_recv_rate(rate)
+    }
+    pub fn update_bandwidth(&mut self, bw: u16){
+        self.congestion.update_bandwidth(bw)
+    }
+    pub fn on_ack(&mut self, ack_no:SequenceNumber){
+        self.congestion.on_ack(ack_no);
     }
 }
 
