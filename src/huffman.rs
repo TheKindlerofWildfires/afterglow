@@ -117,7 +117,7 @@ impl<'a> Iterator for UnboundedDecoder<'a> {
 
         loop {
             match &node.data {
-                Node::Leaf(leaf) => return Some(leaf.data.clone()),
+                Node::Leaf(leaf) => return Some(leaf.data),
                 Node::Branch(branch) => {
                     node = match self.iter.next() {
                         Some(true) => &self.tree.arena[branch.left],
@@ -135,6 +135,12 @@ pub struct EncodeError;
 #[derive(Clone, Debug)]
 pub struct Bitter {
     vec: Vec<bool>,
+}
+
+impl Default for Bitter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Bitter {
@@ -161,6 +167,9 @@ impl Bitter {
     }
     pub fn len(&self)->usize{
         self.vec.len()
+    }
+    pub fn is_empty(&self)->bool{
+        self.vec.len()==0
     }
     pub fn get_u8(&self, ptr: &mut usize)->u8{
         let mut out = 0;
@@ -293,7 +302,7 @@ impl Book {
     pub fn encode(&self, buffer: &mut Bitter, k: &u8) -> Result<(), EncodeError>
     {
         match self.book.get(k) {
-            Some(code) => buffer.extend(&code),
+            Some(code) => buffer.extend(code),
             None => return Err(EncodeError {}),
         }
 
@@ -309,7 +318,7 @@ impl Book {
     fn build(&mut self, arena: &[NodeElement], node: &NodeElement, word: Bitter) {
         match &node.data {
             Node::Leaf(leaf) => {
-                self.book.insert(leaf.data.clone(), word);
+                self.book.insert(leaf.data, word);
             }
             Node::Branch(branch) => {
                 let mut left_word = word.clone();
@@ -360,7 +369,7 @@ impl CodeBuilder {
     pub fn push(&mut self, symbol: u8, weight: u16) {
         self.heap.push(HeapData {
             weight: Reverse(weight),
-            symbol: symbol.clone(),
+            symbol,
             id: self.arena.len(),
         });
 
@@ -459,7 +468,7 @@ impl<'a> FromIterator<(&'a u8, &'a u16)> for CodeBuilder {
     where
         E: IntoIterator<Item = (&'a u8, &'a u16)>,
     {
-        CodeBuilder::from_iter(weights.into_iter().map(|(k, v)| (k.clone(), v.clone())))
+        CodeBuilder::from_iter(weights.into_iter().map(|(k, v)| (*k, *v)))
     }
 }
 
@@ -468,7 +477,7 @@ impl<'a> Extend<(&'a u8, &'a u16)> for CodeBuilder {
     where
         E: IntoIterator<Item = (&'a u8, &'a u16)>,
     {
-        self.extend(weights.into_iter().map(|(k, v)| (k.clone(), v.clone())));
+        self.extend(weights.into_iter().map(|(k, v)| (*k, *v)));
     }
 }
 
@@ -482,8 +491,8 @@ struct HeapData {
 impl Clone for HeapData {
     fn clone(&self) -> HeapData {
         HeapData {
-            weight: Reverse(self.weight.0.clone()),
-            symbol: self.symbol.clone(),
+            weight: Reverse(self.weight.0),
+            symbol: self.symbol,
             id: self.id,
         }
     }

@@ -81,15 +81,9 @@ impl NeonStream {
     pub fn read(&self) -> Vec<u8> {
         let socket_id = self.socket_id;
         loop {
-            match self.core.write() {
-                Ok(mut core) => match core.read_data(socket_id) {
-                    Some(data) => {
-                        return data;
-                    }
-                    None => {}
-                },
-                Err(_) => {}
-            }
+            if let Ok(mut core) = self.core.write() { if let Some(data) = core.read_data(socket_id) {
+                return data;
+            } }
         }
     }
     pub fn write(&self, bytes: &[u8], ttl: Duration, order: bool) -> Result<(), Error> {

@@ -86,7 +86,9 @@ impl SendBuffer {
                 } else {
                     DataPacketType::Middle
                 };
-                let packet = DataPacket::new(
+                
+
+                DataPacket::new(
                     self.last_seq,
                     self.last_msg,
                     element,
@@ -94,9 +96,7 @@ impl SendBuffer {
                     stamp,
                     partner_id,
                     chunk.to_vec(),
-                );
-
-                packet
+                )
             })
             .collect::<Vec<_>>();
         self.last_msg.inc();
@@ -131,10 +131,7 @@ impl SendBuffer {
             self.blocks
                 .clone()
                 .into_iter()
-                .partition(|(_, block)| match block.timeout.elapsed() {
-                    Ok(_) => false,
-                    Err(_) => true,
-                });
+                .partition(|(_, block)| block.timeout.elapsed().is_err());
         drops.into_iter().for_each(|(seq_no, block)| {
             match self.drops.get_mut(&block.packet.msg_no) {
                 Some(dropped_msg) => {
@@ -173,31 +170,33 @@ impl SendBuffer {
     /* */
     pub fn read_recall(&mut self, msg_no: MessageNumber) -> Option<DataPacket> {
         self.manage_drops();
-        match self
+        self
             .blocks
             .iter()
-            .find(|(_, block)| block.packet.msg_no == msg_no)
-        {
-            Some((_, block)) => Some(block.packet.clone()),
-            None => None,
-        }
+            .find(|(_, block)| block.packet.msg_no == msg_no).map(|(_, block)| block.packet.clone())
     }
     pub fn search(&mut self, range: SequenceRange) -> Option<DataPacket> {
-        match self
+        dbg!(&self.blocks.len());
+        
+        let candidates = self
             .blocks
             .iter()
-            .find(|(seq_no, _)| range.contains(**seq_no))
-        {
-            Some((_, block)) => Some(block.packet.clone()),
-            None => None,
-        }
+            .filter(|(seq_no, _)| range.contains(**seq_no)).map(|(seq_no, block)| (*seq_no,block.packet.clone())).collect::<Vec<_>>();
+        let first = candidates.iter().fold((SequenceNumber::MAX_SEQ_NO, None), |acc, c|{
+            if c.0<acc.0{
+                (c.0, Some(c.1.clone()))
+            }else{
+                acc
+            }
+        });
+        first.1
     }
     pub fn ack(&mut self, ack_no: SequenceNumber) -> bool {
-        //Remove blocks and drops from before this ack number
+        //Remove blocks and drops from before this ack number->problem because ack is wrong (TODO)
         self.blocks
             .retain(|seq_no, block| *seq_no > ack_no || block.state == BlockState::Fresh);
         self.drops
-            .retain(|_, seqs| seqs.iter().fold(false, |acc, seq| acc || *seq > ack_no));
+            .retain(|_, seqs| seqs.iter().any(|seq| *seq > ack_no));
         match self.last_ack_time.elapsed() {
             Ok(time) => {
                 if time > SYN_INTERVAL || ack_no == self.last_ack {

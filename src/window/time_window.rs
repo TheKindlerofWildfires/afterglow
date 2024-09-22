@@ -12,6 +12,12 @@ pub struct TimeWindow {
 }
 const MEDIAN_LIMIT: usize = 128;
 
+impl Default for TimeWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimeWindow {
     pub fn new() -> Self {
         let packet_size = 16;
@@ -40,7 +46,7 @@ impl TimeWindow {
             Duration::from_micros((self.min_send_interval.as_micros() as f64 * factor) as u64);
     }
     pub fn receive_speed(&self) -> usize {
-        if self.packet_windows.len()==0{
+        if self.packet_windows.is_empty(){
             return 0
         }
         let mut replica = self.packet_windows.clone();
@@ -59,6 +65,9 @@ impl TimeWindow {
             .iter()
             .position(|rep| *rep <= upper)
             .expect("Invariant in median failed");
+        if start>stop{
+            return 0;
+        }
         let count = stop - start;
         if count < MEDIAN_LIMIT {
             0
@@ -70,7 +79,7 @@ impl TimeWindow {
         }
     }
     pub fn bandwidth(&self) -> usize {
-        if self.probe_windows.len()==0{
+        if self.probe_windows.is_empty(){
             return 0
         }
         let mut replica = self.probe_windows.clone();
@@ -100,27 +109,21 @@ impl TimeWindow {
         }
     }
     pub fn on_packet_sent(&mut self, send_time: SystemTime) {
-        match send_time.duration_since(self.last_packet) {
-            Ok(interval) => {
-                self.min_send_interval = interval;
-            }
-            Err(_) => {}
+        if let Ok(interval) = send_time.duration_since(self.last_packet) {
+            self.min_send_interval = interval;
         };
         self.last_packet = send_time;
     }
     pub fn on_packet_arrival(&mut self) {
         let time = SystemTime::now();
-        match time.duration_since(self.last_packet) {
-            Ok(duration) => {
-                let dur = duration.as_millis() as usize;
-                if self.packet_windows.len() < self.packet_size {
-                    self.packet_windows.push(dur)
-                } else {
-                    self.packet_windows[self.packet_index] = dur;
-                    self.packet_index = (self.packet_index + 1) % self.packet_size;
-                }
+        if let Ok(duration) = time.duration_since(self.last_packet) {
+            let dur = duration.as_millis() as usize;
+            if self.packet_windows.len() < self.packet_size {
+                self.packet_windows.push(dur)
+            } else {
+                self.packet_windows[self.packet_index] = dur;
+                self.packet_index = (self.packet_index + 1) % self.packet_size;
             }
-            Err(_) => {}
         }
     }
     pub fn probe_start(&mut self) {
@@ -128,17 +131,14 @@ impl TimeWindow {
     }
     pub fn probe_stop(&mut self) {
         let time = SystemTime::now();
-        match time.duration_since(self.last_packet) {
-            Ok(duration) => {
-                let dur = duration.as_millis() as usize;
-                if self.probe_windows.len() < self.probe_size {
-                    self.probe_windows.push(dur)
-                } else {
-                    self.probe_windows[self.probe_index] = dur;
-                    self.probe_index = (self.probe_index + 1) % self.probe_size;
-                }
+        if let Ok(duration) = time.duration_since(self.last_packet) {
+            let dur = duration.as_millis() as usize;
+            if self.probe_windows.len() < self.probe_size {
+                self.probe_windows.push(dur)
+            } else {
+                self.probe_windows[self.probe_index] = dur;
+                self.probe_index = (self.probe_index + 1) % self.probe_size;
             }
-            Err(_) => {}
         }
     }
 }

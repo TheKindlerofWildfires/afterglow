@@ -31,6 +31,12 @@ pub struct CongestionController {
     pkt_count: usize,
 }
 
+impl Default for CongestionController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CongestionController {
     pub fn new() -> Self {
         let pkt_send_period = Duration::from_micros(1);

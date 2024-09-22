@@ -54,14 +54,14 @@ impl DataPacket {
         let (book, tree) = CodeBuilder::from_iter(weights).finish();
         let mut bitter = tree.bitter_serial();
         for byte in bytes {
-            book.encode(&mut bitter, &byte)
+            book.encode(&mut bitter, byte)
                 .expect("Invariant failed in huffman");
         }
         bitter.serialize()
     }
 
     pub fn decompress(bytes: &[u8]) -> Vec<u8> {
-        let mut bitter = Bitter::deserialize(&bytes, &mut 0);
+        let mut bitter = Bitter::deserialize(bytes, &mut 0);
         let mut ptr = 0;
         let tree = Tree::bitter_deserial(&bitter, &mut ptr);
         bitter.forward(ptr);
@@ -100,10 +100,7 @@ impl Serial for DataPacket {
             0x40 => DataPacketType::Last,
             _ => DataPacketType::Middle,
         };
-        let order = match control & 0x20 {
-            0x20 => true,
-            _ => false,
-        };
+        let order = matches!(control & 0x20, 0x20);
         let stamp = SystemTime::deserialize(bytes, start);
         let dst_socket_id = u16::deserialize(bytes, start);
 

@@ -55,12 +55,13 @@ impl RecvBuffer {
             stop.dec();
             Some(SequenceRange { start, stop })
         } else {
+            //update sequence numbers
+            if packet.seq_no > self.last_seq {
+                self.last_seq = packet.seq_no;
+            }
             None
         };
-        //update sequence numbers
-        if packet.seq_no > self.last_seq {
-            self.last_seq = packet.seq_no;
-        }
+
         //put the data into the list
         match self.blocks.get_mut(&msg_no) {
             //Append to existing messages
@@ -90,7 +91,7 @@ impl RecvBuffer {
             .filter(|(_, block)| block.state == BlockState::Complete)
             .collect::<Vec<_>>();
         //Sort the block by message number
-        complete_blocks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        complete_blocks.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let out = match complete_blocks.first_mut() {
             Some((msg_no, block)) => {
                 //check that this is the next message in the sequence

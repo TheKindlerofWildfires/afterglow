@@ -32,7 +32,7 @@ impl Handshake {
         hash.update(&flow_control.serialize());
         hash.update(&socket_id.serialize());
         let minute = match time.duration_since(UNIX_EPOCH){
-            Ok(dur)=>dur.as_secs() / 60 + (dur.as_millis()%u64::MAX as u128) as u64,
+            Ok(dur)=>dur.as_secs() / 60 as u64,
             Err(_)=>0
         };
         hash.update(&minute.serialize());
@@ -107,20 +107,16 @@ impl Handshake {
     }
     pub fn validate(mss: u16, flow_control: u16, socket_id: u16, info: Self) -> bool {
         //create a cookie from the packet
-        let (cookie, isn) = Self::cookie(mss, flow_control, socket_id, SystemTime::now());
-        if cookie != info.cookie || SequenceNumber::new(isn) != info.isn {
+        let (cookie, _) = Self::cookie(mss, flow_control, socket_id, SystemTime::now());
+        if cookie != info.cookie {
             //try last cookie
-            let (cookie, isn) = Self::cookie(
+            let (cookie, _) = Self::cookie(
                 mss,
                 flow_control,
                 socket_id,
                 SystemTime::now() - Duration::from_millis(1000),
             );
-            if cookie != info.cookie || SequenceNumber::new(isn) != info.isn {
-                true
-            } else {
-                true
-            }
+            cookie == info.cookie
         } else {
             true
         }

@@ -4,6 +4,12 @@ use crate::serial::Serial;
 pub struct Shutdown{
 
 }
+impl Default for Shutdown {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Shutdown{
     pub fn new()->Self{
         Self{}

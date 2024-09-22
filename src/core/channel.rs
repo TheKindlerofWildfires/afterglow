@@ -1,5 +1,5 @@
 use crate::{
-    packet::{control::ControlType, Packet, HEADER_SIZE},
+    packet::{Packet, HEADER_SIZE},
     serial::Serial,
 };
 use std::{
@@ -56,7 +56,7 @@ impl NeonChannel {
         match SOCKET_COUNTER.lock() {
             Ok(mut ctr) => {
                 let socket_id = ctr.0;
-                *ctr = *ctr + Wrapping(1u16);
+                *ctr += Wrapping(1u16);
                 socket_id
             }
             Err(_) => 0xffff,
@@ -117,21 +117,16 @@ impl NeonSocket {
             {
                 socket.send_to(&packet.serialize(), addr)
             } else {
-                dbg!("SEND Drop");
 
                 match &packet {
                     Packet::Control(ctrl) => {
-                        dbg!(&ctrl.control_type);
-                        if ctrl.control_type != ControlType::Discover {
-                            socket.send_to(&packet.serialize(), addr)
-                        } else {
-                            Err(Error::new(ErrorKind::Other, "-_-".to_string()))
-                        }
+                        socket.send_to(&packet.serialize(), addr)
                     }
 
                     Packet::Data(data) => {
-                        dbg!(data);
-                        socket.send_to(&packet.serialize(), addr)
+                        dbg!("SEND Drop");
+
+                        Err(Error::new(ErrorKind::Other, "-_-".to_string()))
                     }
                 }
             }
@@ -166,20 +161,14 @@ impl NeonSocket {
             {
                 Ok(packet)
             } else {
-                dbg!("RECV Drop");
                 match &packet {
                     Packet::Control(ctrl) => {
-                        dbg!(&ctrl.control_type);
-                        if ctrl.control_type!=ControlType::Discover{
-                            Ok(packet)
-
-                        }else{
-                            Err(Error::new(ErrorKind::Other, "-_-".to_string()))
-                        }
+                        Ok(packet)
                     }
                     Packet::Data(data) => {
-                        dbg!(&data);
-                        Ok(packet)
+                        dbg!("RECV Drop");
+
+                        Err(Error::new(ErrorKind::Other, "-_-".to_string()))
                     }
                 }
             }

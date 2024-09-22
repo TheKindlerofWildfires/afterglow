@@ -45,7 +45,8 @@ impl NeonConnection {
         let first_update = SystemTime::now();
         let closing = Arc::new(RwLock::new(false));
         let expiration_counter =1;
-        let out = Self {
+        
+        Self {
             isn,
             status,
             partner_id,
@@ -57,8 +58,7 @@ impl NeonConnection {
             first_update,
             closing,
             expiration_counter
-        };
-        out
+        }
     }
     pub fn status(&self) -> NeonStatus {
         self.status
@@ -86,10 +86,7 @@ impl NeonConnection {
             Ok(timeout) => {
                 //if it's dead close the socket
                 if self.expiration_counter > 16 && timeout > Duration::from_micros(500000) {
-                    match self.closing.write(){
-                        Ok(mut closing)=>*closing=true,
-                        Err(_)=>{}
-                    }
+                    if let Ok(mut closing) = self.closing.write() { *closing=true }
                     self.status = NeonStatus::Unhealthy(0x0001);
                     false
                 }else{

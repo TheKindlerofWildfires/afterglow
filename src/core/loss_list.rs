@@ -6,6 +6,12 @@ pub struct LossBuffer {
     lost_ranges: Vec<SequenceRange>,
 }
 
+impl Default for LossBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LossBuffer {
     pub fn new() -> Self {
         let lost_ranges = Vec::new();
@@ -105,14 +111,15 @@ impl LossBuffer {
         self.lost_ranges
             .sort_unstable_by(|a, b| a.start.cmp(&b.start).reverse());
         self.lost_ranges.first().copied()
+        
     }
 
     pub fn encode(&self, mss: u16) -> Vec<SequenceRange> {
         let mut count = 0;
-        let mut ranges = self.lost_ranges.iter();
+        let ranges = self.lost_ranges.iter();
         let mut out_ranges = Vec::new();
         let limit = mss/2;
-        while let Some(range) = ranges.next() {
+        for range in ranges {
             let cc = 2;
             if count + cc< limit{
                 count+=cc;

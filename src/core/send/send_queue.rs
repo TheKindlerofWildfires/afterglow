@@ -22,6 +22,12 @@ pub struct SendQueue {
 */
 
 //I think this should have a 'neon in' and 'udp out' thread and reverse for recv if they can be made to work together
+impl Default for SendQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SendQueue {
     pub fn new() -> Self {
         let list = Arc::new(RwLock::new(SendList::new()));
@@ -33,10 +39,7 @@ impl SendQueue {
         self_isn: SequenceNumber,
         partner_isn: SequenceNumber,
     ) {
-        match self.list.write() {
-            Ok(mut binding) => binding.register_connection(socket_id, self_isn, partner_isn),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.register_connection(socket_id, self_isn, partner_isn) }
     }
 
     pub fn push_data(
@@ -73,10 +76,7 @@ impl SendQueue {
         }
     }
     pub fn loss(&mut self, socket_id: u16, loss: SequenceRange) {
-        match self.list.write() {
-            Ok(mut list) => list.loss(socket_id, loss),
-            Err(_) => {}
-        }
+        if let Ok(mut list) = self.list.write() { list.loss(socket_id, loss) }
     }
     pub fn ack(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
         match self.list.write() {
@@ -92,27 +92,18 @@ impl SendQueue {
         }
     }
     pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.list.write() {
-            Ok(mut list) => {
-                if !list.out_of_sequence_square(socket_id, ack_no) {
-                    list.ack_square(socket_id, ack_no);
-                }
+        if let Ok(mut list) = self.list.write() {
+            if !list.out_of_sequence_square(socket_id, ack_no) {
+                list.ack_square(socket_id, ack_no);
             }
-            Err(_) => {}
         }
     }
     pub fn update(&mut self, socket_id: u16, cnt: usize, delay: Duration) {
-        match self.list.write() {
-            Ok(mut list) => list.update(socket_id, cnt,delay),
-            Err(_) => {}
-        }
+        if let Ok(mut list) = self.list.write() { list.update(socket_id, cnt,delay) }
     }
 
     pub fn remove(&mut self, socket_id: u16) {
-        match self.list.write() {
-            Ok(mut binding) => binding.remove_connection(socket_id),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.remove_connection(socket_id) }
     }
     pub fn last_seq(&self, socket_id: u16)->Option<SequenceNumber>{
         match self.list.read() {

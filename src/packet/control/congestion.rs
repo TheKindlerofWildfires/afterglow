@@ -3,6 +3,12 @@ use crate::serial::Serial;
 #[derive(Copy,Clone,Debug)]
 pub struct Congestion{}
 
+impl Default for Congestion {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Congestion {
     pub fn new() -> Self {
         Self {}

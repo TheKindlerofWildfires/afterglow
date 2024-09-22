@@ -8,7 +8,7 @@ pub struct NeonListener {
 impl NeonListener {
     pub fn simplex(addr: SocketAddr) -> Result<Self, Error> {
         //create a socket
-        let channel = match NeonChannel::simplex(addr.clone()) {
+        let channel = match NeonChannel::simplex(addr) {
             Ok(channel) => Arc::new(RwLock::new(channel)),
             Err(err) => return Err(err),
         };
@@ -22,10 +22,7 @@ impl NeonListener {
             //check if there is a queued stream
             let thread_core = self.core.clone();
             match self.core.write(){
-                Ok(mut core) => match core.next_stream(thread_core) {
-                    Some(stream) => {return Ok(stream);},
-                    None => {}
-                },
+                Ok(mut core) => if let Some(stream) = core.next_stream(thread_core) {return Ok(stream);},
                 Err(_) => return Err(Error::new(ErrorKind::Interrupted, "Poisoned")),
             }
             //TODO condvar

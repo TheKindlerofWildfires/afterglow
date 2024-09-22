@@ -3,6 +3,12 @@ use crate::serial::Serial;
 #[derive(Copy, Clone, Debug)]
 pub struct Err {}
 
+impl Default for Err {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Err {
     pub fn new() -> Self {
         Self {}

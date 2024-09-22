@@ -3,6 +3,12 @@ use crate::serial::Serial;
 #[derive(Copy, Clone, Debug)]
 pub struct AckSquare {}
 
+impl Default for AckSquare {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AckSquare {
     pub fn new() -> Self {
         Self {}

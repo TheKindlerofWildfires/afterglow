@@ -26,15 +26,15 @@ impl Packet {
 
 impl Serial for Packet {
     fn serialize(&self) -> Vec<u8> {
-        let bytes = match self {
+        
+        match self {
             Packet::Control(packet) => {
                 let mut bytes = packet.serialize();
                 bytes[0] |= 0x80;
                 bytes
             }
             Packet::Data(packet) => packet.serialize(),
-        };
-        bytes
+        }
     }
 
     fn deserialize(bytes: &[u8], start: &mut usize) -> Self {

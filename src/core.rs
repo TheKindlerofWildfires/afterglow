@@ -15,8 +15,7 @@ use crate::{
     connection::NeonConnection,
     packet::{
         control::{
-            handshake::{Handshake, ReqType, FLOW_CONTROL},
-            ControlMeta, ControlPacket, ControlPacketInfo, ControlType,
+            handshake::{Handshake, ReqType, FLOW_CONTROL}, ControlMeta, ControlPacket, ControlPacketInfo, ControlType
         },
         data::DataPacket,
         Packet,
@@ -90,15 +89,12 @@ impl NeonCore {
                             Ok(addr) => addr,
                             Err(_) => return,
                         };
-                        match channel.inbound.recv_from(&mut addr) {
-                            Ok(packet) => {
-                                drop(channel);
-                                match thread_core.write() {
-                                    Ok(mut tc) => tc.process_packet(addr, packet),
-                                    Err(_) => return,
-                                };
-                            }
-                            Err(_) => {}
+                        if let Ok(packet) = channel.inbound.recv_from(&mut addr) {
+                            drop(channel);
+                            match thread_core.write() {
+                                Ok(mut tc) => tc.process_packet(addr, packet),
+                                Err(_) => return,
+                            };
                         }
                     }
                     Err(_) => return,
@@ -130,26 +126,20 @@ impl NeonCore {
             };
 
             loop {
-                match thread_core.read() {
-                    Ok(tc) => tc.manage_queue(),
-                    Err(_) => {}
-                }
+                if let Ok(tc) = thread_core.read() { tc.manage_queue() }
                 //lot of words to say 'only pop when something gets added to the buffer'
-                match poll.clone() {
-                    Some(arc) => {
-                        let (cond, ws) = &*arc;
-                        let mut waiting_sockets = match ws.lock() {
+                if let Some(arc) = poll.clone() {
+                    let (cond, ws) = &*arc;
+                    let mut waiting_sockets = match ws.lock() {
+                        Ok(ws) => ws,
+                        Err(_) => return,
+                    };
+                    while waiting_sockets.is_empty() {
+                        waiting_sockets = match cond.wait(waiting_sockets) {
                             Ok(ws) => ws,
                             Err(_) => return,
                         };
-                        while waiting_sockets.is_empty() {
-                            waiting_sockets = match cond.wait(waiting_sockets) {
-                                Ok(ws) => ws,
-                                Err(_) => return,
-                            };
-                        }
                     }
-                    None => {}
                 }
             }
         });
@@ -165,26 +155,19 @@ impl NeonCore {
             Ok(send) => send.next_time(),
             Err(_) => None,
         };
-        match update {
-            Some((socket_id, delay)) => {
-                thread::sleep(delay);
-                let addr = match self.connections.get(&socket_id) {
-                    Some(conn) => conn.partner_in_addr(),
-                    None => return,
-                };
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-
-                match self.send.write() {
-                    Ok(mut send) => {
-                        let _ = send.send_data(&channel, addr, socket_id);
-                    }
-                    Err(_) => {}
-                };
-            }
-            None => {}
+        if let Some((socket_id, delay)) = update {
+            thread::sleep(delay);
+            let addr = match self.connections.get(&socket_id) {
+                Some(conn) => conn.partner_in_addr(),
+                None => return,
+            };
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(mut send) = self.send.write() {
+                let _ = send.send_data(&channel, addr, socket_id);
+            };
         }
     }
     pub fn manage_streams(&mut self, core: Arc<RwLock<NeonCore>>) {
@@ -197,7 +180,7 @@ impl NeonCore {
                 NeonStream::from_core(*socket_id, core.clone())
             })
             .collect::<Vec<_>>();
-        self.queued_streams.extend(streams.into_iter())
+        self.queued_streams.extend(streams)
     }
     pub fn manage_state(&mut self) {
         //keep alive portion
@@ -224,19 +207,14 @@ impl NeonCore {
             .for_each(|socket_id| self.send_keep_alive(socket_id));
         //ack portion
         let sockets = self
-            .connections
-            .iter()
-            .map(|(socket_id, _)| *socket_id)
+            .connections.keys().copied()
             .collect::<Vec<_>>();
         sockets.into_iter().for_each(|socket_id| {
             let next_ack = match self.recv.write() {
                 Ok(recv) => recv.next_ack(socket_id),
                 Err(_) => None,
             };
-            match next_ack {
-                Some((ack_no, seq_no)) => self.send_ack(socket_id, ack_no, seq_no),
-                None => {}
-            }
+            if let Some((ack_no, seq_no)) = next_ack { self.send_ack(socket_id, ack_no, seq_no) }
         });
         //heal discovery portion
         let sockets = self
@@ -244,11 +222,11 @@ impl NeonCore {
             .iter()
             .filter(|(_, conn)| {
                 let status = conn.status();
-                dbg!(status);
                 status == NeonStatus::Negotiating
             })
             .map(|(socket_id, _)| *socket_id)
             .collect::<Vec<_>>();
+
         sockets
             .into_iter()
             .for_each(|socket_id| self.send_discover(socket_id,ReqType::Connection));
@@ -287,15 +265,12 @@ impl NeonCore {
             }
             Err(_) => None,
         };
-        match next_ack {
-            Some((ack_no, seq_no)) => self.send_ack(socket_id, ack_no, seq_no),
-            None => {}
-        }
+        if let Some((ack_no, seq_no)) = next_ack { self.send_ack(socket_id, ack_no, seq_no) }
 
         //should update the timeout here
         match packet.control_type {
             ControlType::Handshake => self.process_handshake(socket_id, packet),
-            ControlType::KeepAlive => {}
+            ControlType::KeepAlive => self.process_keep_alive(socket_id,packet),
             ControlType::Ack => self.process_ack(socket_id, packet),
             ControlType::Loss => self.process_loss(socket_id, packet),
             ControlType::Congestion => self.process_congestion(socket_id, packet),
@@ -325,20 +300,19 @@ impl NeonCore {
             Ok(mut recv) => recv.process_data(packet, out_mss),
             Err(_) => vec![],
         };
-        if losses.len() > 0 {
+        if !losses.is_empty() {
             self.send_loss(socket_id, losses);
+        }else{
+            let next_ack = match self.recv.write() {
+                Ok(mut recv) => {
+                    recv.on_pkt(socket_id);
+                    recv.next_ack(socket_id)
+                }
+                Err(_) => None,
+            };
+            if let Some((ack_no, seq_no)) = next_ack { self.send_ack(socket_id, ack_no, seq_no) }
         }
-        let next_ack = match self.recv.write() {
-            Ok(mut recv) => {
-                recv.on_pkt(socket_id);
-                recv.next_ack(socket_id)
-            }
-            Err(_) => None,
-        };
-        match next_ack {
-            Some((ack_no, seq_no)) => self.send_ack(socket_id, ack_no, seq_no),
-            None => {}
-        }
+
 
         self.manage_state();
         //Toss the processing down to the recv queue / recv list
@@ -368,10 +342,7 @@ impl NeonCore {
                         isn = out_isn;
                         let response_packet = Packet::Control(packet);
 
-                        match channel.send_to(partner_in_addr, response_packet) {
-                            Ok(_) => true,
-                            Err(_) => false,
-                        }
+                        channel.send_to(partner_in_addr, response_packet).is_ok()
                     }
                     Err(_) => false,
                 }
@@ -398,14 +369,8 @@ impl NeonCore {
                         info.mss,
                     );
                     self.connections.insert(socket_id, connection);
-                    match self.send.write() {
-                        Ok(send) => send.register_connection(socket_id, isn, info.isn),
-                        Err(_) => {}
-                    }
-                    match self.recv.write() {
-                        Ok(recv) => recv.register_connection(socket_id, info.isn, isn),
-                        Err(_) => {}
-                    }
+                    if let Ok(send) = self.send.write() { send.register_connection(socket_id, isn, info.isn) }
+                    if let Ok(recv) = self.recv.write() { recv.register_connection(socket_id, info.isn, isn) }
                 }
             }
             self.send_discover(socket_id,ReqType::Connection);
@@ -451,7 +416,7 @@ impl NeonCore {
                             Err(err) => Err(err),
                         },
                         Err(_) => {
-                            return Err(Error::new(ErrorKind::NotConnected, "Channel collapsed"))
+                            Err(Error::new(ErrorKind::NotConnected, "Channel collapsed"))
                         }
                     }
                 } else {
@@ -475,7 +440,7 @@ impl NeonCore {
                         Ok(_) => Err(Error::new(ErrorKind::NotConnected, "No response yet")),
                         Err(err) => Err(err),
                     },
-                    Err(_) => return Err(Error::new(ErrorKind::NotConnected, "Channel collapsed")),
+                    Err(_) => Err(Error::new(ErrorKind::NotConnected, "Channel collapsed")),
                 }
             }
         }
@@ -503,33 +468,23 @@ impl NeonCore {
         };
         match info.req_type {
             ReqType::Connection => {
-                return;
             }
             ReqType::Response => {
                 if Handshake::validate(MAX_PACKET_SIZE, FLOW_CONTROL, socket_id, info) {
-                    match self.connections.get_mut(&socket_id) {
-                        Some(connection) => {
-                            connection.negotiate(stamp, info.src_socket_id, info.port);
-                            match self.recv.write() {
-                                Ok(recv) => {
-                                    recv.register_connection(socket_id, info.isn, connection.isn())
-                                }
-                                Err(_) => {}
-                            }
-                            match self.send.write() {
-                                Ok(send) => {
-                                    send.register_connection(socket_id, connection.isn(), info.isn)
-                                }
-                                Err(_) => {}
-                            }
+                    if let Some(connection) = self.connections.get_mut(&socket_id) {
+                        connection.negotiate(stamp, info.src_socket_id, info.port);
+                        if let Ok(recv) = self.recv.write() {
+                            recv.register_connection(socket_id, info.isn, connection.isn())
                         }
-                        None => {}
+                        if let Ok(send) = self.send.write() {
+                            send.register_connection(socket_id, connection.isn(), info.isn)
+                        }
                     }
 
                     self.send_discover(socket_id,ReqType::Connection);
                 }
             }
-        };
+        }
     }
     pub fn send_data(
         &self,
@@ -560,187 +515,140 @@ impl NeonCore {
         }
     }
     pub fn send_ack(&mut self, socket_id: u16, ack_no: SequenceNumber, seq_no: SequenceNumber) {
-        match self.recv.write() {
-            Ok(recv) => {
-                match self.connections.get_mut(&socket_id) {
-                    Some(connection) => {
-                        recv.sent_ack(socket_id, ack_no);
-                        let (rtt, rtt_var, buffer, window, bandwidth) =
-                            match recv.time_data(socket_id) {
-                                Some(data) => data,
-                                None => return,
-                            };
-                        let (addr, packet) = connection.create_ack(
-                            ack_no,
-                            seq_no,
-                            rtt,
-                            rtt_var,
-                            buffer as u16,
-                            window,
-                            bandwidth,
-                        );
-                        let channel = match self.channel.read() {
-                            Ok(channel) => channel,
-                            Err(_) => return,
-                        };
-                        match self.send.write() {
-                            Ok(send) => {
-                                let _ = send.send_packet(&channel, addr, packet);
-                            }
-                            Err(_) => {}
-                        }
-                    }
-                    None => return,
-                };
-            }
-            Err(_) => return,
-        };
-    }
-    pub fn send_ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_ack_square(ack_no);
+        if let Ok(recv) = self.recv.write() {
+            if let Some(connection) = self.connections.get_mut(&socket_id) {
+                recv.sent_ack(socket_id, ack_no);
+                let (rtt, rtt_var, buffer, window, bandwidth) =
+                    match recv.time_data(socket_id) {
+                        Some(data) => data,
+                        None => return,
+                    };
+                let (addr, packet) = connection.create_ack(
+                    ack_no,
+                    seq_no,
+                    rtt,
+                    rtt_var,
+                    buffer as u16,
+                    window,
+                    bandwidth,
+                );
                 let channel = match self.channel.read() {
                     Ok(channel) => channel,
                     Err(_) => return,
                 };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
+                if let Ok(send) = self.send.write() {
+                    let _ = send.send_packet(&channel, addr, packet);
                 }
             }
-            None => {}
+        }
+    }
+    pub fn send_ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_ack_square(ack_no);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
+            }
         }
     }
     pub fn send_loss(&mut self, socket_id: u16, ranges: Vec<SequenceRange>) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_loss(ranges);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_loss(ranges);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
     }
     pub fn send_congestion(&mut self, socket_id: u16, factor: f64) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_congestion(factor);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_congestion(factor);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
     }
     pub fn send_keep_alive(&mut self, socket_id: u16) {
-        match self.send.write() {
-            Ok(send) => {
-                if send.keep_alive(socket_id) {
-                    match self.connections.get_mut(&socket_id) {
-                        Some(connection) => {
-                            let (addr, packet) = connection.create_keep_alive();
-                            let channel = match self.channel.read() {
-                                Ok(channel) => channel,
-                                Err(_) => return,
-                            };
-                            let _ = send.send_packet(&channel, addr, packet);
-                        }
-                        None => {}
-                    }
+        if let Ok(send) = self.send.write() {
+            if send.keep_alive(socket_id) {
+                if let Some(connection) = self.connections.get_mut(&socket_id) {
+                    let (addr, packet) = connection.create_keep_alive();
+                    let channel = match self.channel.read() {
+                        Ok(channel) => channel,
+                        Err(_) => return,
+                    };
+                    let _ = send.send_packet(&channel, addr, packet);
                 }
             }
-            Err(_) => {}
         }
     }
     pub fn send_shutdown(&mut self, socket_id: u16, code: u16) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_shutdown(code);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_shutdown(code);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
     }
     pub fn send_error(&mut self, socket_id: u16, code: u16) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_error(code);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_error(code);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
     }
     pub fn send_drop(&mut self, socket_id: u16, msg_no: MessageNumber, range: SequenceRange) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_drop(msg_no, range);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_drop(msg_no, range);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
     }
     pub fn send_discover(&mut self, socket_id: u16,req_type: ReqType) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                let (addr, packet) = connection.create_discovery(req_type);
-                let channel = match self.channel.read() {
-                    Ok(channel) => channel,
-                    Err(_) => return,
-                };
-                match self.send.write() {
-                    Ok(send) => {
-                        let _ = send.send_packet(&channel, addr, packet);
-                    }
-                    Err(_) => {}
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            let (addr, packet) = connection.create_discovery(req_type);
+            let channel = match self.channel.read() {
+                Ok(channel) => channel,
+                Err(_) => return,
+            };
+            if let Ok(send) = self.send.write() {
+                let _ = send.send_packet(&channel, addr, packet);
             }
-            None => {}
         }
+    }
+    pub fn process_keep_alive(&mut self, socket_id: u16, _: ControlPacket) {
+        //If keep alive but ack is wrong resend
+        if let Ok(send) = self.send.write(){
+            send.keep_alive(socket_id);
+        }
+        /* 
+        if let Ok(recv) = self.recv.write() {
+            recv.drop_msg(socket_id, msg_no, info.range);
+        };*/
     }
     pub fn process_ack(&mut self, socket_id: u16, packet: ControlPacket) {
         let info = match packet.info {
@@ -751,10 +659,7 @@ impl NeonCore {
             ControlMeta::Seq(other) => other,
             _ => return,
         };
-        match self.recv.write() {
-            Ok(mut binding) => binding.on_ack(socket_id, ack_no, info),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.recv.write() { binding.on_ack(socket_id, ack_no, info) }
 
         if match self.send.write() {
             Ok(mut binding) => binding.ack(socket_id, ack_no),
@@ -769,19 +674,13 @@ impl NeonCore {
             ControlPacketInfo::Loss(info) => info,
             _ => return,
         };
-        match self.send.write() {
-            Ok(mut binding) => {
-                info.loss_range
-                    .iter()
-                    .for_each(|range| binding.loss(socket_id, *range));
-            }
-            Err(_) => {}
+        if let Ok(mut binding) = self.send.write() {
+            info.loss_range
+                .iter()
+                .for_each(|range| binding.loss(socket_id, *range));
         }
-        match self.recv.read() {
-            Ok(binding) => {
-                binding.loss(socket_id, info.loss_range);
-            }
-            Err(_) => {}
+        if let Ok(binding) = self.recv.read() {
+            binding.loss(socket_id, info.loss_range);
         }
     }
     pub fn process_congestion(&mut self, socket_id: u16, packet: ControlPacket) {
@@ -790,10 +689,7 @@ impl NeonCore {
             ControlMeta::Other(factor) => (factor as f64 + 1.0).log2(),
             _ => return,
         };
-        match self.recv.write() {
-            Ok(recv) => recv.update_delay(socket_id, factor),
-            Err(_) => {}
-        }
+        if let Ok(recv) = self.recv.write() { recv.update_delay(socket_id, factor) }
     }
     pub fn process_shutdown(&mut self, socket_id: u16, packet: ControlPacket) {
         let code = match packet.meta {
@@ -807,30 +703,18 @@ impl NeonCore {
 
         self.connections.remove(&socket_id);
 
-        match self.send.write() {
-            Ok(mut binding) => binding.remove(socket_id),
-            Err(_) => {}
-        }
-        match self.recv.write() {
-            Ok(mut binding) => binding.remove(socket_id),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.send.write() { binding.remove(socket_id) }
+        if let Ok(mut binding) = self.recv.write() { binding.remove(socket_id) }
     }
     pub fn process_ack_square(&mut self, socket_id: u16, packet: ControlPacket) {
         let ack_no = match packet.meta {
             ControlMeta::Seq(other) => other,
             _ => return,
         };
-        match self.recv.write() {
-            Ok(mut binding) => binding.ack_square(socket_id, ack_no),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.recv.write() { binding.ack_square(socket_id, ack_no) }
 
         //validate ack
-        match self.send.write() {
-            Ok(mut binding) => binding.ack_square(socket_id, ack_no),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.send.write() { binding.ack_square(socket_id, ack_no) }
         /*
         match self.send.read() {
             Ok(send) => send.ackd_square(ack_no),
@@ -846,22 +730,17 @@ impl NeonCore {
             ControlPacketInfo::Drop(info) => info,
             _ => return,
         };
-        match self.recv.write() {
-            Ok(recv) => {
-                recv.drop_msg(socket_id, msg_no, info.range);
-            }
-            Err(_) => {}
+        if let Ok(recv) = self.recv.write() {
+            recv.drop_msg(socket_id, msg_no, info.range);
         };
     }
+    
     pub fn process_err(&mut self, socket_id: u16, packet: ControlPacket) {
         let code = match packet.meta {
             ControlMeta::Other(other) => other,
             _ => return,
         };
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => connection.error(code),
-            None => {}
-        }
+        if let Some(connection) = self.connections.get_mut(&socket_id) { connection.error(code) }
     }
     pub fn process_discover(&mut self, socket_id: u16, packet: ControlPacket) {
         //measures how much of the packet made it
@@ -873,16 +752,14 @@ impl NeonCore {
             ControlMeta::Other(other) => other,
             _ => return,
         };
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                connection.establish(info.data.len() as u16, meta);
-                match info.req_type{
-                    ReqType::Connection=> self.send_discover(socket_id, ReqType::Response),
-                    ReqType::Response=>{}
-                   
-                }
-            },
-            None => {}
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+
+            connection.establish(info.data.len() as u16, meta);
+            match info.req_type{
+                ReqType::Connection=> self.send_discover(socket_id, ReqType::Response),
+                ReqType::Response=>{}
+               
+            }
         }
     }
 }

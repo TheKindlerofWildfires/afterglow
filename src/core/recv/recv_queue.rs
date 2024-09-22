@@ -25,6 +25,12 @@ pub struct RecvQueue {
         passing managed results from the buffer to the stream
 
 */
+impl Default for RecvQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RecvQueue {
     pub fn new() -> Self {
         let list = Arc::new(RwLock::new(RecvList::new()));
@@ -36,16 +42,10 @@ impl RecvQueue {
         self_isn: SequenceNumber,
         partner_isn: SequenceNumber,
     ) {
-        match self.list.write() {
-            Ok(mut binding) => binding.register_connection(socket_id, self_isn, partner_isn),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.register_connection(socket_id, self_isn, partner_isn) }
     }
     pub fn drop_msg(&self, socket_id: u16, msg_no: MessageNumber, range: SequenceRange) {
-        match self.list.write() {
-            Ok(mut binding) => binding.drop_msg(socket_id, msg_no, range),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.drop_msg(socket_id, msg_no, range) }
     }
 
     pub fn process_data(&mut self, packet: DataPacket, mss: u16) -> Vec<SequenceRange> {
@@ -64,10 +64,7 @@ impl RecvQueue {
     }
 
     pub fn update_delay(&self, socket_id: u16, factor: f64) {
-        match self.list.write() {
-            Ok(mut binding) => binding.update_delay(socket_id, factor),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.update_delay(socket_id, factor) }
     }
     pub fn next_ack(&self, socket_id: u16) -> Option<(SequenceNumber, SequenceNumber)> {
         match self.list.write() {
@@ -76,10 +73,7 @@ impl RecvQueue {
         }
     }
     pub fn sent_ack(&self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.list.write() {
-            Ok(mut binding) => binding.sent_ack(socket_id, ack_no),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.sent_ack(socket_id, ack_no) }
     }
 
     pub fn time_data(&self, socket_id: u16) -> Option<(Duration, Duration, usize, usize, usize)> {
@@ -99,10 +93,7 @@ impl RecvQueue {
     }
 
     pub fn remove(&mut self, socket_id: u16) {
-        match self.list.write() {
-            Ok(mut binding) => binding.remove_connection(socket_id),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.remove_connection(socket_id) }
     }
     pub fn read_data(&self, socket_id: u16) -> Option<Vec<u8>> {
         match self.list.write() {
@@ -111,17 +102,11 @@ impl RecvQueue {
         }
     }
     pub fn loss(&self, socket_id: u16, loss_ranges: Vec<SequenceRange>) {
-        match self.list.write() {
-            Ok(mut binding) => binding.loss(socket_id, loss_ranges),
-            Err(_) => {}
-        }
+        if let Ok(mut binding) = self.list.write() { binding.loss(socket_id, loss_ranges) }
     }
     pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.list.write() {
-            Ok(mut list) => {
-                list.ack_square(socket_id, ack_no);
-            }
-            Err(_) => {}
+        if let Ok(mut list) = self.list.write() {
+            list.ack_square(socket_id, ack_no);
         }
     }
     pub fn delay(&self, socket_id: u16) -> Duration {
@@ -131,19 +116,13 @@ impl RecvQueue {
         }
     }
     pub fn on_pkt(&mut self, socket_id: u16) {
-        match self.list.write() {
-            Ok(mut list) => {
-                list.on_pkt(socket_id);
-            }
-            Err(_) => {}
+        if let Ok(mut list) = self.list.write() {
+            list.on_pkt(socket_id);
         }
     }
     pub fn on_ack(&mut self, socket_id: u16, ack_no: SequenceNumber, ack: Ack) {
-        match self.list.write() {
-            Ok(mut list) => {
-                list.on_ack(socket_id, ack_no, ack);
-            }
-            Err(_) => {}
+        if let Ok(mut list) = self.list.write() {
+            list.on_ack(socket_id, ack_no, ack);
         }
     }
 }

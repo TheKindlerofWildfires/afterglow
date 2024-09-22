@@ -3,6 +3,12 @@ use crate::serial::Serial;
 #[derive(Copy,Clone,Debug)]
 pub struct KeepAlive {}
 
+impl Default for KeepAlive {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeepAlive{
     pub fn new()->Self{
         Self{}

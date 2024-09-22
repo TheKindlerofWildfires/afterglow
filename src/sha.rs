@@ -25,10 +25,7 @@ impl W {
     fn new(input: &[u8]) -> Self {
         let mut w = [0u32; 16];
         for (i, e) in w.iter_mut().enumerate() {
-            let marshal: [u8; 4] = match input[i * 4..i * 4 + 4].try_into(){
-                Ok(data)=>data,
-                Err(_)=>[0;4]
-            };
+            let marshal: [u8; 4] = input[i * 4..i * 4 + 4].try_into().unwrap_or_default();
             *e = u32::from_be_bytes(marshal); //divergence
         }
         Self(w)
@@ -81,9 +78,9 @@ impl W {
             .wrapping_add(self.0[i]);
         t[(16 - i + 3) & 7] = t[(16 - i + 3) & 7].wrapping_add(t[(16 - i + 7) & 7]);
         t[(16 - i + 7) & 7] = t[(16 - i + 7) & 7]
-            .wrapping_add(Self::fsigma0(t[(16 - i + 0) & 7]))
+            .wrapping_add(Self::fsigma0(t[(16 - i) & 7]))
             .wrapping_add(Self::maj(
-                t[(16 - i + 0) & 7],
+                t[(16 - i) & 7],
                 t[(16 - i + 1) & 7],
                 t[(16 - i + 2) & 7],
             ));
@@ -98,10 +95,7 @@ impl State {
     fn new() -> Self {
         let mut t = [0u32; 8];
         for (i, e) in t.iter_mut().enumerate() {
-            let marshal: [u8; 4] = match IV[i * 4..i * 4 + 4].try_into(){
-                Ok(data)=>data,
-                Err(_)=>[0;4]
-            };
+            let marshal: [u8; 4] = IV[i * 4..i * 4 + 4].try_into().unwrap_or_default();
             *e = u32::from_be_bytes(marshal);
         }
         State(t)
@@ -145,6 +139,12 @@ pub struct Hash {
     w: [u8; 64],
     r: usize,
     len: usize,
+}
+
+impl Default for Hash {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Hash {

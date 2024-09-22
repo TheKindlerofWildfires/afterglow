@@ -173,7 +173,7 @@ function afterglow.dissector(buffer, pinfo, tree)
             ack_subtree:add(control_ack_buffer_size, buffer(14,2))
             ack_subtree:add(control_ack_window, buffer(16,2))
             ack_subtree:add(control_ack_bandwidth, buffer(18,2))
-        elseif control_type_data==2 then
+        elseif control_type_data==3 then
             local loss_subtree = control_subtree:add(afterglow, buffer(), "Loss")
             loss_subtree:add(control_loss_start, buffer(8,2))
             loss_subtree:add(control_loss_stop, buffer(10,2))

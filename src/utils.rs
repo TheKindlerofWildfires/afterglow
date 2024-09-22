@@ -99,18 +99,18 @@ pub struct SequenceRange {
 
 impl SequenceRange {
     pub fn contains(&self, number: SequenceNumber) -> bool {
-        self.start < number && self.stop > number
+        self.start <= number && self.stop >= number
     }
     pub fn combine_sequences(
         insert_range: SequenceRange,
         ranges: Vec<SequenceRange>,
     ) -> Vec<SequenceRange> {
         let (mut overlap, mut safe): (Vec<_>, Vec<_>) = ranges.into_iter().partition(|range| {
-            (range.start < insert_range.start && range.stop > insert_range.start)
-                || (range.stop > insert_range.stop && range.start < insert_range.start)
-                || (range.start > insert_range.start && range.stop < insert_range.stop)
+            (range.start <= insert_range.start && range.stop >= insert_range.start)
+                || (range.start <= insert_range.stop && range.stop >= insert_range.stop)
+                || (range.start >= insert_range.start && range.stop <= insert_range.stop)
         });
-
+        overlap.push(insert_range);
         //sort the overlaps
         overlap.sort_unstable_by(|a, b| a.start.cmp(&b.start));
 

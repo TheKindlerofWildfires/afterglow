@@ -23,6 +23,12 @@ struct SendBacker {
     updates: BinaryHeap<SystemTime>,
 }
 
+impl Default for SendList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SendList {
     pub fn new() -> Self {
         let connections = HashMap::new();
@@ -77,13 +83,10 @@ impl SendList {
                         .push(SystemTime::now() + delay * (i + 1) as u32);
                 });
                 //This socket is now waiting to be worked
-                match self.poll.1.lock() {
-                    Ok(mut waiting) => {
-                        (0..cnt).for_each(|_|{
-                            waiting.push(socket_id)
-                        });
-                    },
-                    Err(_) => {}
+                if let Ok(mut waiting) = self.poll.1.lock() {
+                    (0..cnt).for_each(|_|{
+                        waiting.push(socket_id)
+                    });
                 };
                 self.poll.0.notify_all();
             }
@@ -100,6 +103,7 @@ impl SendList {
     pub fn pop(&mut self, socket_id: u16) -> Option<Packet> {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
+                dbg!(&connection.loss_buffer);
                 while let Some(loss) = connection.loss_buffer.first() {
                     match connection.data_buffer.search(loss) {
                         Some(packet) => {
@@ -111,28 +115,24 @@ impl SendList {
                         }
                     }
                 }
-                match connection.data_buffer.read() {
-                    Some(packet) => Some(Packet::Data(packet)),
-                    None => None,
-                }
+                connection.data_buffer.read().map(Packet::Data)
             }
             None => None,
         }
     }
 
     pub fn loss(&mut self, socket_id: u16, loss: SequenceRange) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                if loss.start < loss.stop && loss.stop < connection.data_buffer.last_seq() {
-                    connection.loss_buffer.insert(loss);
-                }
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            if loss.start < loss.stop && loss.stop < connection.data_buffer.last_seq() {
+                connection.loss_buffer.insert(loss);
             }
-            None => {}
         }
     }
     pub fn out_of_sequence(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => connection.data_buffer.last_seq() < ack_no,
+            Some(connection) => {
+                connection.data_buffer.last_seq() < ack_no
+            },
             None => false,
         }
     }
@@ -143,11 +143,8 @@ impl SendList {
         }
     }
     pub fn remove_confirmed(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                connection.loss_buffer.remove_confirmed(ack_no);
-            }
-            None => {}
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            connection.loss_buffer.remove_confirmed(ack_no);
         }
     }
     pub fn ack(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
@@ -157,11 +154,8 @@ impl SendList {
         }
     }
     pub fn ack_square(&mut self, socket_id: u16, ack_no: SequenceNumber) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                connection.data_buffer.ack_square(ack_no);
-            }
-            None => {}
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            connection.data_buffer.ack_square(ack_no);
         }
     }
 
@@ -211,13 +205,10 @@ impl SendList {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
                 //Remove the first count of this socket from the queue
-                match self.poll.1.lock() {
-                    Ok(mut waiting) => {
-                        if let Some(pos) = waiting.iter().position(|&x| x == socket_id) {
-                            waiting.remove(pos);
-                        }
+                if let Ok(mut waiting) = self.poll.1.lock() {
+                    if let Some(pos) = waiting.iter().position(|&x| x == socket_id) {
+                        waiting.remove(pos);
                     }
-                    Err(_) => {}
                 };
                 match connection.updates.pop() {
                     Some(time) => match time.duration_since(SystemTime::now()) {
@@ -231,10 +222,7 @@ impl SendList {
         }
     }
     pub fn last_seq(&self, socket_id: u16) -> Option<SequenceNumber> {
-        match self.connections.get(&socket_id) {
-            Some(connection) => Some(connection.data_buffer.last_seq()),
-            None => None,
-        }
+        self.connections.get(&socket_id).map(|connection| connection.data_buffer.last_seq())
     }
 
     pub fn keep_alive(&mut self,socket_id: u16)->bool{
@@ -243,6 +231,10 @@ impl SendList {
                 match connection.data_buffer.keep_alive(){
                     Some(seq_range)=>{
                         connection.loss_buffer.insert(seq_range);
+                        if let Ok(mut ws) = self.poll.1.lock(){
+                            ws.push(socket_id);
+                        }
+                        connection.updates.push(SystemTime::now());
                         self.poll.0.notify_all();
                         false
                     },
