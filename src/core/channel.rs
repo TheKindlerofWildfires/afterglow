@@ -1,13 +1,13 @@
 use crate::{
-    packet::{Packet, HEADER_SIZE},
+    packet::{control::ControlType, Packet, HEADER_SIZE},
     serial::Serial,
 };
 use std::{
-    io::Error,
+    io::{Error, ErrorKind},
     net::{SocketAddr, UdpSocket},
     num::Wrapping,
-    sync::Arc,
-    sync::Mutex,
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const MAX_PACKET_SIZE: u16 = 128;
@@ -77,11 +77,11 @@ impl NeonSocket {
             Ok(socket) => socket,
             Err(err) => return Err(err),
         };
-        /* 
+        /*
         //Rust does polling on sockets itself in blocking mode which is better than my loop
         //set nonblockng
 
-        
+
         match socket.set_nonblocking(true) {
             Ok(_) => {}
             Err(err) => return Err(err),
@@ -106,7 +106,40 @@ impl NeonSocket {
             SocketDirection::Out => &self.socket,
             SocketDirection::Shared => &self.socket,
         };
-        socket.send_to(&packet.serialize(), addr)
+        #[cfg(feature = "drop_send")]
+        {
+            if SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 2
+                == 0
+            {
+                socket.send_to(&packet.serialize(), addr)
+            } else {
+                dbg!("SEND Drop");
+
+                match &packet {
+                    Packet::Control(ctrl) => {
+                        dbg!(&ctrl.control_type);
+                        if ctrl.control_type != ControlType::Discover {
+                            socket.send_to(&packet.serialize(), addr)
+                        } else {
+                            Err(Error::new(ErrorKind::Other, "-_-".to_string()))
+                        }
+                    }
+
+                    Packet::Data(data) => {
+                        dbg!(data);
+                        socket.send_to(&packet.serialize(), addr)
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "drop_send"))]
+        {
+            socket.send_to(&packet.serialize(), addr)
+        }
     }
     pub fn recv_from(&self, addr: &mut SocketAddr) -> Result<Packet, Error> {
         let socket = match self.direction {
@@ -122,6 +155,38 @@ impl NeonSocket {
         };
         let packet = Packet::deserialize(&bytes[..count], &mut 0);
         *addr = recv_addr;
-        Ok(packet)
+        #[cfg(feature = "drop_recv")]
+        {
+            if SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 2
+                == 0
+            {
+                Ok(packet)
+            } else {
+                dbg!("RECV Drop");
+                match &packet {
+                    Packet::Control(ctrl) => {
+                        dbg!(&ctrl.control_type);
+                        if ctrl.control_type!=ControlType::Discover{
+                            Ok(packet)
+
+                        }else{
+                            Err(Error::new(ErrorKind::Other, "-_-".to_string()))
+                        }
+                    }
+                    Packet::Data(data) => {
+                        dbg!(&data);
+                        Ok(packet)
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "drop_recv"))]
+        {
+            Ok(packet)
+        }
     }
 }

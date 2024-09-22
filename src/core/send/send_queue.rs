@@ -108,11 +108,6 @@ impl SendQueue {
         }
     }
 
-    /*
-    pub fn drops(&self) -> Vec<SendBlock> {
-        let mut list_lock = self.list.write().unwrap();
-        list_lock.drops()
-    }*/
     pub fn remove(&mut self, socket_id: u16) {
         match self.list.write() {
             Ok(mut binding) => binding.remove_connection(socket_id),

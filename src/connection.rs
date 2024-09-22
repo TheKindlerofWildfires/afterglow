@@ -8,7 +8,7 @@ use std::{
 use crate::{
     core::{NeonStatus, SYN_INTERVAL},
     packet::{
-        control::ControlPacket,
+        control::{handshake::ReqType, ControlPacket},
         Packet,
     },
     utils::{MessageNumber, SequenceNumber, SequenceRange},
@@ -80,15 +80,16 @@ impl NeonConnection {
         if exp_int < self.expiration_counter * MIN_EXPIRATION {
             exp_int = self.expiration_counter * MIN_EXPIRATION
         }
-        dbg!(Duration::from_micros(exp_int as u64).as_millis());
         let next_expiration_time = self.last_update + Duration::from_micros(exp_int as u64);
-        dbg!(exp_int);
         self.expiration_counter+=1;
         match next_expiration_time.elapsed() {
             Ok(timeout) => {
                 //if it's dead close the socket
                 if self.expiration_counter > 16 && timeout > Duration::from_micros(500000) {
-                    *self.closing.write().unwrap() = true;
+                    match self.closing.write(){
+                        Ok(mut closing)=>*closing=true,
+                        Err(_)=>{}
+                    }
                     self.status = NeonStatus::Unhealthy(0x0001);
                     false
                 }else{
@@ -154,11 +155,12 @@ impl NeonConnection {
         let packet = Packet::Control(ControlPacket::drop(self.partner_id, msg_no, ranges));
         (self.partner_in_addr, packet)
     }
-    pub fn create_discovery(&mut self) -> (SocketAddr, Packet) {
+    pub fn create_discovery(&mut self,req_type:ReqType) -> (SocketAddr, Packet) {
         let packet = Packet::Control(ControlPacket::discovery(
             self.partner_id,
             self.in_mss,
             self.out_mss,
+            req_type
         ));
         (self.partner_in_addr, packet)
     }
@@ -174,7 +176,6 @@ impl NeonConnection {
 
     pub fn validate(&mut self, addr: SocketAddr) -> bool {
         if self.partner_in_addr == addr {
-            dbg!("Got in a packet, validating and resetting time");
             self.last_update = SystemTime::now();
             self.expiration_counter=1;
             true

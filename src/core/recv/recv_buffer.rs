@@ -20,7 +20,6 @@ pub struct RecvBuffer {
 
 impl RecvBuffer {
     pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
-        dbg!(self_isn,partner_isn);
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
         let last_seq = self_isn;
@@ -155,10 +154,10 @@ impl RecvBuffer {
     }
     pub fn should_ack(&mut self,proposed_ack: SequenceNumber)->Option<(SequenceNumber,SequenceNumber)>{
         let should_ack = match self.next_ack_time.elapsed() {
-            Ok(elapse) => {
+            Ok(_) => {
                 true
             }
-            Err(err) => {
+            Err(_) => {
                 self.congestion.should_ack()
             }
         };

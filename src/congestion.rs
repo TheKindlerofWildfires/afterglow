@@ -119,7 +119,6 @@ impl CongestionController {
             self.loss = false;
             return;
         }
-        dbg!(self.bandwidth, self.pkt_send_period.as_micros());
         let mut b= self.bandwidth as isize-1000000/self.pkt_send_period.as_micros() as isize;
         if self.pkt_send_period>self.last_dec_period && self.bandwidth as isize/9<b{
             b = self.bandwidth as isize/9;

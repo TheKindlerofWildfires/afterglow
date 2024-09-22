@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Condvar, Mutex, RwLock},
     thread,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use channel::{NeonChannel, MAX_PACKET_SIZE};
@@ -86,7 +86,10 @@ impl NeonCore {
                 //is there a way to poll on channel
                 match channel.read() {
                     Ok(channel) => {
-                        let mut addr = "0.0.0.0:80".parse::<SocketAddr>().unwrap();
+                        let mut addr = match "0.0.0.0:80".parse::<SocketAddr>() {
+                            Ok(addr) => addr,
+                            Err(_) => return,
+                        };
                         match channel.inbound.recv_from(&mut addr) {
                             Ok(packet) => {
                                 drop(channel);
@@ -164,7 +167,6 @@ impl NeonCore {
         };
         match update {
             Some((socket_id, delay)) => {
-                dbg!(socket_id, delay);
                 thread::sleep(delay);
                 let addr = match self.connections.get(&socket_id) {
                     Some(conn) => conn.partner_in_addr(),
@@ -198,29 +200,34 @@ impl NeonCore {
         self.queued_streams.extend(streams.into_iter())
     }
     pub fn manage_state(&mut self) {
-        let sockets = self.connections
+        //keep alive portion
+        let sockets = self
+            .connections
             .iter_mut()
             .filter_map(|(socket_id, connection)| {
-                let (rtt,rtt_var) = match self.recv.read(){
-                    Ok(recv)=>{
-                        match recv.time_data(*socket_id){
-                            Some(data)=>(data.0,data.1),
-                            None=>(Duration::ZERO,Duration::ZERO)
-                        }
+                let (rtt, rtt_var) = match self.recv.read() {
+                    Ok(recv) => match recv.time_data(*socket_id) {
+                        Some(data) => (data.0, data.1),
+                        None => (Duration::ZERO, Duration::ZERO),
                     },
-                    Err(_)=>(Duration::ZERO,Duration::ZERO)
+                    Err(_) => (Duration::ZERO, Duration::ZERO),
                 };
-                if connection.should_keep_alive(rtt,rtt_var) {
+                if connection.should_keep_alive(rtt, rtt_var) {
                     Some(*socket_id)
                 } else {
                     None
                 }
             })
             .collect::<Vec<_>>();
-        sockets.into_iter().for_each(|socket_id| {
-            self.send_keep_alive(socket_id)
-        });
-        let sockets =  self.connections.iter().map(|(socket_id,_)|*socket_id).collect::<Vec<_>>();
+        sockets
+            .into_iter()
+            .for_each(|socket_id| self.send_keep_alive(socket_id));
+        //ack portion
+        let sockets = self
+            .connections
+            .iter()
+            .map(|(socket_id, _)| *socket_id)
+            .collect::<Vec<_>>();
         sockets.into_iter().for_each(|socket_id| {
             let next_ack = match self.recv.write() {
                 Ok(recv) => recv.next_ack(socket_id),
@@ -231,6 +238,20 @@ impl NeonCore {
                 None => {}
             }
         });
+        //heal discovery portion
+        let sockets = self
+            .connections
+            .iter()
+            .filter(|(_, conn)| {
+                let status = conn.status();
+                dbg!(status);
+                status == NeonStatus::Negotiating
+            })
+            .map(|(socket_id, _)| *socket_id)
+            .collect::<Vec<_>>();
+        sockets
+            .into_iter()
+            .for_each(|socket_id| self.send_discover(socket_id,ReqType::Connection));
     }
     pub fn process_packet(&mut self, addr: SocketAddr, packet: Packet) {
         match packet {
@@ -364,7 +385,6 @@ impl NeonCore {
                 Some(connection) => {
                     connection.negotiate(stamp, info.src_socket_id, info.port);
                     //If there was already a connection update it
-                    self.send_discover(socket_id);
                 }
                 None => {
                     //If this is a first time set up a new connection
@@ -386,11 +406,9 @@ impl NeonCore {
                         Ok(recv) => recv.register_connection(socket_id, info.isn, isn),
                         Err(_) => {}
                     }
-                    println!("C {}", socket_id);
-
-                    self.send_discover(socket_id);
                 }
             }
+            self.send_discover(socket_id,ReqType::Connection);
         }
     }
 
@@ -402,8 +420,10 @@ impl NeonCore {
         socket_id: u16,
     ) -> Result<(), Error> {
         let mss = MAX_PACKET_SIZE;
-        let channel_lock = self.channel.read().unwrap();
-        let local_in_addr = channel_lock.inbound.addr;
+        let local_in_addr = match self.channel.read() {
+            Ok(channel) => channel.inbound.addr,
+            Err(_) => return Err(Error::new(ErrorKind::NotConnected, "Channel collapsed")),
+        };
         let packet = Packet::Control(ControlPacket::handshake(
             u16::MAX, //We don't know the other socket
             req_type,
@@ -425,10 +445,14 @@ impl NeonCore {
             Some(connection) => {
                 //If it's connecting send another packet incase we dropped
                 if connection.status() == NeonStatus::Connecting {
-                    let channel_lock = self.channel.read().unwrap();
-                    match channel_lock.send_to(other_addr, packet.clone()) {
-                        Ok(_) => Err(Error::new(ErrorKind::NotConnected, "No response yet")),
-                        Err(err) => Err(err),
+                    match self.channel.read() {
+                        Ok(channel) => match channel.send_to(other_addr, packet.clone()) {
+                            Ok(_) => Err(Error::new(ErrorKind::NotConnected, "No response yet")),
+                            Err(err) => Err(err),
+                        },
+                        Err(_) => {
+                            return Err(Error::new(ErrorKind::NotConnected, "Channel collapsed"))
+                        }
                     }
                 } else {
                     Ok(()) //this is an already established connections
@@ -446,11 +470,12 @@ impl NeonCore {
                     MAX_PACKET_SIZE,
                 );
                 self.connections.insert(socket_id, connection);
-
-                let channel_lock = self.channel.read().unwrap();
-                match channel_lock.send_to(other_addr, packet.clone()) {
-                    Ok(_) => Err(Error::new(ErrorKind::NotConnected, "No response yet")),
-                    Err(err) => Err(err),
+                match self.channel.read() {
+                    Ok(channel) => match channel.send_to(other_addr, packet.clone()) {
+                        Ok(_) => Err(Error::new(ErrorKind::NotConnected, "No response yet")),
+                        Err(err) => Err(err),
+                    },
+                    Err(_) => return Err(Error::new(ErrorKind::NotConnected, "Channel collapsed")),
                 }
             }
         }
@@ -498,13 +523,10 @@ impl NeonCore {
                                 Err(_) => {}
                             }
                         }
-                        None => {
-                            dbg!("The connection doesn't exit yet");
-                        }
+                        None => {}
                     }
-                    println!("B {}", socket_id);
 
-                    self.send_discover(socket_id);
+                    self.send_discover(socket_id,ReqType::Connection);
                 }
             }
         };
@@ -528,13 +550,10 @@ impl NeonCore {
             Ok(recv) => recv.delay(socket_id),
             Err(_) => Duration::ZERO,
         };
-        dbg!(delay);
-        let now = SystemTime::now();
         match self.send.write() {
             Ok(mut send) => {
                 let cnt = send.push_data(socket_id, data, ttl, order, partner_id, out_mss);
                 send.update(socket_id, cnt, delay);
-                dbg!("final", now.elapsed());
                 Ok(())
             }
             Err(_) => Err(Error::new(ErrorKind::Interrupted, "Poisoned")),
@@ -543,16 +562,23 @@ impl NeonCore {
     pub fn send_ack(&mut self, socket_id: u16, ack_no: SequenceNumber, seq_no: SequenceNumber) {
         match self.recv.write() {
             Ok(recv) => {
-                dbg!(ack_no);
                 match self.connections.get_mut(&socket_id) {
                     Some(connection) => {
                         recv.sent_ack(socket_id, ack_no);
-                        let (rtt,rtt_var, buffer, window, bandwidth) = match recv.time_data(socket_id) {
-                            Some(data) => data,
-                            None => return,
-                        };
-                        let (addr, packet) =
-                            connection.create_ack(ack_no, seq_no, rtt,rtt_var,buffer as u16, window, bandwidth);
+                        let (rtt, rtt_var, buffer, window, bandwidth) =
+                            match recv.time_data(socket_id) {
+                                Some(data) => data,
+                                None => return,
+                            };
+                        let (addr, packet) = connection.create_ack(
+                            ack_no,
+                            seq_no,
+                            rtt,
+                            rtt_var,
+                            buffer as u16,
+                            window,
+                            bandwidth,
+                        );
                         let channel = match self.channel.read() {
                             Ok(channel) => channel,
                             Err(_) => return,
@@ -625,9 +651,9 @@ impl NeonCore {
         }
     }
     pub fn send_keep_alive(&mut self, socket_id: u16) {
-        match self.send.write(){
-            Ok(send)=>{
-                if send.keep_alive(socket_id){
+        match self.send.write() {
+            Ok(send) => {
+                if send.keep_alive(socket_id) {
                     match self.connections.get_mut(&socket_id) {
                         Some(connection) => {
                             let (addr, packet) = connection.create_keep_alive();
@@ -640,11 +666,9 @@ impl NeonCore {
                         None => {}
                     }
                 }
-
-            },
-            Err(_)=>{}
+            }
+            Err(_) => {}
         }
-
     }
     pub fn send_shutdown(&mut self, socket_id: u16, code: u16) {
         match self.connections.get_mut(&socket_id) {
@@ -700,10 +724,10 @@ impl NeonCore {
             None => {}
         }
     }
-    pub fn send_discover(&mut self, socket_id: u16) {
+    pub fn send_discover(&mut self, socket_id: u16,req_type: ReqType) {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
-                let (addr, packet) = connection.create_discovery();
+                let (addr, packet) = connection.create_discovery(req_type);
                 let channel = match self.channel.read() {
                     Ok(channel) => channel,
                     Err(_) => return,
@@ -728,8 +752,8 @@ impl NeonCore {
             _ => return,
         };
         match self.recv.write() {
-            Ok(mut binding) => binding.on_ack(socket_id, ack_no,info),
-            Err(_) => {},
+            Ok(mut binding) => binding.on_ack(socket_id, ack_no, info),
+            Err(_) => {}
         }
 
         if match self.send.write() {
@@ -850,7 +874,14 @@ impl NeonCore {
             _ => return,
         };
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => connection.establish(info.data.len() as u16, meta),
+            Some(connection) => {
+                connection.establish(info.data.len() as u16, meta);
+                match info.req_type{
+                    ReqType::Connection=> self.send_discover(socket_id, ReqType::Response),
+                    ReqType::Response=>{}
+                   
+                }
+            },
             None => {}
         }
     }

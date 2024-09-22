@@ -218,11 +218,11 @@ impl ControlPacket {
             info,
         }
     }
-    pub fn discovery(dst_socket_id: u16, in_mss: u16, out_mss: u16) -> Self {
+    pub fn discovery(dst_socket_id: u16, in_mss: u16, out_mss: u16,req_type: ReqType) -> Self {
         let control_type = ControlType::Discover;
         let meta = ControlMeta::Other(in_mss);
         let stamp = SystemTime::now();
-        let info = ControlPacketInfo::Discover(Discover::new(out_mss.into()));
+        let info = ControlPacketInfo::Discover(Discover::new(out_mss.into(),req_type));
         Self {
             control_type,
             meta,

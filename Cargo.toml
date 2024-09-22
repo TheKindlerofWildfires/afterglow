@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 
 [features]
-fragmenting_socket = []
-loss_socket = []
+default = ["drop_recv", "drop_send"]
+drop_send = []
+drop_recv = []

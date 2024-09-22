@@ -234,7 +234,6 @@ impl SendBuffer {
         self.last_ack
     }
     pub fn keep_alive(&self) ->Option<SequenceRange>{
-        dbg!(self.last_seq, self.last_ack);
         if self.last_seq != self.last_ack {
             Some(SequenceRange{
                 start: self.last_ack,

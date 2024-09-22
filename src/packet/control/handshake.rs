@@ -31,7 +31,10 @@ impl Handshake {
         hash.update(&mss.serialize());
         hash.update(&flow_control.serialize());
         hash.update(&socket_id.serialize());
-        let minute = time.duration_since(UNIX_EPOCH).unwrap().as_secs() / 60 + (time.duration_since(UNIX_EPOCH).unwrap().as_millis()%u64::MAX as u128) as u64;
+        let minute = match time.duration_since(UNIX_EPOCH){
+            Ok(dur)=>dur.as_secs() / 60 + (dur.as_millis()%u64::MAX as u128) as u64,
+            Err(_)=>0
+        };
         hash.update(&minute.serialize());
         let large_cookie = hash.finalize();
         let mut start = 0;
