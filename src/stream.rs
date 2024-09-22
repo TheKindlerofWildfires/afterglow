@@ -44,7 +44,33 @@ impl NeonStream {
             Err(err) => return Err(err),
         }
 
-        //let core = NeonCore::new(channel, mss);
+        Ok(Self { core, socket_id })
+    }
+    pub fn duplex(
+        out_addr: SocketAddr,
+        in_addr: SocketAddr,
+        max_attempts: usize,
+        timeout: Duration,
+        other: SocketAddr,
+    ) -> Result<Self, Error> {
+        //Step 1: Create the channels
+        let (socket_id, channel) = match NeonChannel::duplex(out_addr,in_addr) {
+            Ok(channel) => {
+                let socket_id = channel.inc_socket_id();
+                (socket_id, Arc::new(RwLock::new(channel)))
+            }
+            Err(err) => return Err(err),
+        };
+
+        //Step 2: Create a core with max mss
+        let core = Arc::new(RwLock::new(NeonCore::new(channel)));
+        NeonCore::work(core.clone());
+        //Step 3: Handshake to establish connection (should timeout loop)
+        match Self::handshake(max_attempts, timeout, other, core.clone(), socket_id) {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        }
+
         Ok(Self { core, socket_id })
     }
     pub fn from_core(socket_id: u16, core: Arc<RwLock<NeonCore>>)->Self{

@@ -1,8 +1,9 @@
+use std::fmt::Debug;
 use crate::serial::Serial;
 
 use super::handshake::ReqType;
 
-#[derive(Clone,Debug)]
+#[derive(Clone)]
 pub struct Discover {
     pub req_type: ReqType,
     pub data: Vec<u8>,
@@ -38,8 +39,11 @@ impl Serial for Discover {
         Self {req_type, data }
     }
 }
-/*
-    If a discovery request drops the connection never gets upgrade
-
-
-*/
+impl Debug for Discover {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Discover")
+            .field("req_type", &self.req_type)
+            .field("len", &self.data.len())
+            .finish()
+    }
+}

@@ -40,9 +40,8 @@ impl RecvQueue {
         &self,
         socket_id: u16,
         self_isn: SequenceNumber,
-        partner_isn: SequenceNumber,
     ) {
-        if let Ok(mut binding) = self.list.write() { binding.register_connection(socket_id, self_isn, partner_isn) }
+        if let Ok(mut binding) = self.list.write() { binding.register_connection(socket_id, self_isn) }
     }
     pub fn drop_msg(&self, socket_id: u16, msg_no: MessageNumber, range: SequenceRange) {
         if let Ok(mut binding) = self.list.write() { binding.drop_msg(socket_id, msg_no, range) }

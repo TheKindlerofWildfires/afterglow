@@ -1,18 +1,18 @@
-use afterglow::tests::basic;
+use afterglow::tests::{single,duplex};
 
 
 
 pub fn main() {
-    //basic::handshake_single();
-    //basic::small_data_single();
-    //basic::medium_data_single();
-    //basic::large_data_single();
-    //basic::small_reply_single();
-    //basic::medium_reply_single();
-    //basic::large_reply_single();
-    //basic::server_double_reply();
-    //basic::server_double_send();
-    basic::keep_alive_single();
+    //single::handshake();
+    //duplex::small_data();
+    //duplex::medium_data();
+    //duplex::large_data();
+    //duplex::small_reply();
+    //duplex::medium_reply();
+    //duplex::large_reply();
+    //duplex::server_double_reply();
+    //duplex::server_double_send();
+    duplex::keep_alive();
     
 }
 

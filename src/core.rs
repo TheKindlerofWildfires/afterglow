@@ -232,6 +232,8 @@ impl NeonCore {
             .for_each(|socket_id| self.send_discover(socket_id,ReqType::Connection));
     }
     pub fn process_packet(&mut self, addr: SocketAddr, packet: Packet) {
+        //dbg!("Got a packet from ", addr, &packet);
+
         match packet {
             Packet::Control(packet) => self.process_control(addr, packet),
             Packet::Data(packet) => self.process_data(addr, packet),
@@ -242,7 +244,7 @@ impl NeonCore {
         //protect existing connections
         let connection_status = match self.connections.get_mut(&socket_id) {
             Some(connection) => {
-                if !connection.validate(addr) {
+                if !connection.validate(addr)&&packet.control_type!=ControlType::Handshake {
                     return;
                 }
                 connection.status()
@@ -336,7 +338,7 @@ impl NeonCore {
                     Ok(channel) => {
                         socket_id = channel.inc_socket_id(); //A new request didn't know my socket
 
-                        let local_out_addr = channel.inbound.addr;
+                        let local_out_addr = channel.outbound.addr;
                         let (out_isn, packet) =
                             Handshake::reply(socket_id, info.src_socket_id, info, local_out_addr);
                         isn = out_isn;
@@ -369,8 +371,8 @@ impl NeonCore {
                         info.mss,
                     );
                     self.connections.insert(socket_id, connection);
-                    if let Ok(send) = self.send.write() { send.register_connection(socket_id, isn, info.isn) }
-                    if let Ok(recv) = self.recv.write() { recv.register_connection(socket_id, info.isn, isn) }
+                    if let Ok(send) = self.send.write() { send.register_connection(socket_id, isn) }
+                    if let Ok(recv) = self.recv.write() { recv.register_connection(socket_id, info.isn) }
                 }
             }
             self.send_discover(socket_id,ReqType::Connection);
@@ -424,6 +426,7 @@ impl NeonCore {
                 }
             }
             None => {
+
                 //First time connection
                 let connection = NeonConnection::new(
                     isn,
@@ -474,10 +477,10 @@ impl NeonCore {
                     if let Some(connection) = self.connections.get_mut(&socket_id) {
                         connection.negotiate(stamp, info.src_socket_id, info.port);
                         if let Ok(recv) = self.recv.write() {
-                            recv.register_connection(socket_id, info.isn, connection.isn())
+                            recv.register_connection(socket_id, info.isn)
                         }
                         if let Ok(send) = self.send.write() {
-                            send.register_connection(socket_id, connection.isn(), info.isn)
+                            send.register_connection(socket_id, connection.isn())
                         }
                     }
 

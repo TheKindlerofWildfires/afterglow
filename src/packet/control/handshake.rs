@@ -32,7 +32,7 @@ impl Handshake {
         hash.update(&flow_control.serialize());
         hash.update(&socket_id.serialize());
         let minute = match time.duration_since(UNIX_EPOCH){
-            Ok(dur)=>dur.as_secs() / 60 as u64,
+            Ok(dur)=>dur.as_secs() / 60,
             Err(_)=>0
         };
         hash.update(&minute.serialize());

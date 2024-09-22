@@ -19,7 +19,7 @@ pub struct RecvBuffer {
 }
 
 impl RecvBuffer {
-    pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
+    pub fn new(self_isn: SequenceNumber) -> Self {
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
         let last_seq = self_isn;

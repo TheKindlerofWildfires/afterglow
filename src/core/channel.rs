@@ -3,11 +3,10 @@ use crate::{
     serial::Serial,
 };
 use std::{
-    io::{Error, ErrorKind},
+    io::Error,
     net::{SocketAddr, UdpSocket},
     num::Wrapping,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const MAX_PACKET_SIZE: u16 = 128;

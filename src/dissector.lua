@@ -193,4 +193,4 @@ local udp_port_1 = DissectorTable.get("udp.port")
 udp_port_1:add(8128, afterglow)
 
 local udp_port_2 = DissectorTable.get("udp.port")
-udp_port_2:add(8192, afterglow)
+udp_port_2:add(8129, afterglow)

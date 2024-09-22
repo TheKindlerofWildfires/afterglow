@@ -21,7 +21,7 @@ pub struct SendBuffer {
     drops: HashMap<MessageNumber, Vec<SequenceNumber>>,
 }
 impl SendBuffer {
-    pub fn new(self_isn: SequenceNumber, partner_isn: SequenceNumber) -> Self {
+    pub fn new(self_isn: SequenceNumber) -> Self {
         let last_msg = MessageNumber::ZERO;
         let blocks = HashMap::new();
         let drops = HashMap::new();
@@ -176,7 +176,6 @@ impl SendBuffer {
             .find(|(_, block)| block.packet.msg_no == msg_no).map(|(_, block)| block.packet.clone())
     }
     pub fn search(&mut self, range: SequenceRange) -> Option<DataPacket> {
-        dbg!(&self.blocks.len());
         
         let candidates = self
             .blocks

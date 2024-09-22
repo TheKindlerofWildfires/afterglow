@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 
 [features]
-default = ["drop_recv", "drop_send"]
+default = []
 drop_send = []
 drop_recv = []

@@ -172,7 +172,7 @@ impl NeonConnection {
     }
 
     pub fn validate(&mut self, addr: SocketAddr) -> bool {
-        if self.partner_in_addr == addr {
+        if self.partner_out_addr == addr {
             self.last_update = SystemTime::now();
             self.expiration_counter=1;
             true
@@ -188,8 +188,7 @@ impl NeonConnection {
         self.first_update = stamp;
         self.partner_id = partner_id;
         self.status = NeonStatus::Negotiating;
-        let partner_in_addr = SocketAddr::new(self.partner_out_addr.ip(), port);
-        self.partner_in_addr = partner_in_addr;
+        self.partner_out_addr = SocketAddr::new(self.partner_out_addr.ip(), port);;
     }
     pub fn partner_id(&self) -> u16 {
         self.partner_id

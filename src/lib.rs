@@ -12,7 +12,6 @@ pub mod stream;
 pub mod connection;
 /*
     Plan:
-        Do duplex testing
         fix keep alive spiral
         regression
         Do full loss
@@ -26,4 +25,4 @@ pub mod connection;
 //Discovery loop when drop happens possible -> timeout 
 //keep alive spiral when lots of loss in multi packet (is this drop related?, did we timeout)
 //not fully tested with mass loss 
-//not fully tested with duplex
+

@@ -41,9 +41,8 @@ impl SendList {
         &mut self,
         socket_id: u16,
         self_isn: SequenceNumber,
-        partner_isn: SequenceNumber,
     ) {
-        let data_buffer = SendBuffer::new(self_isn, partner_isn);
+        let data_buffer = SendBuffer::new(self_isn);
         let loss_buffer = LossBuffer::new();
         let updates = BinaryHeap::new();
         let backer = SendBacker {
@@ -103,7 +102,6 @@ impl SendList {
     pub fn pop(&mut self, socket_id: u16) -> Option<Packet> {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
-                dbg!(&connection.loss_buffer);
                 while let Some(loss) = connection.loss_buffer.first() {
                     match connection.data_buffer.search(loss) {
                         Some(packet) => {

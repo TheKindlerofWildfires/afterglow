@@ -17,6 +17,17 @@ impl NeonListener {
         NeonCore::work(core.clone());
         Ok(Self { core })
     }
+    pub fn duplex(out_addr: SocketAddr, in_addr: SocketAddr) -> Result<Self, Error> {
+        //create a socket
+        let channel = match NeonChannel::duplex(out_addr,in_addr) {
+            Ok(channel) => Arc::new(RwLock::new(channel)),
+            Err(err) => return Err(err),
+        };
+
+        let core = Arc::new(RwLock::new(NeonCore::new(channel.clone())));
+        NeonCore::work(core.clone());
+        Ok(Self { core })
+    }
     pub fn accept(&mut self) -> Result<NeonStream, Error> {
         loop {
             //check if there is a queued stream

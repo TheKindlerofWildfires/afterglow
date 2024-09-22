@@ -33,9 +33,8 @@ impl RecvList {
         &mut self,
         socket_id: u16,
         self_isn: SequenceNumber,
-        partner_isn: SequenceNumber,
     ) {
-        let data_buffer = RecvBuffer::new(self_isn, partner_isn);
+        let data_buffer = RecvBuffer::new(self_isn);
         let loss_buffer = LossBuffer::new();
         let time_window = TimeWindow::new();
         let backer = RecvBacker {
