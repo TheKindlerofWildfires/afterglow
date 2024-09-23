@@ -5,7 +5,7 @@ pub mod single {
     use crate::core::channel::MAX_PACKET_SIZE;
     use crate::listener::NeonListener;
     use crate::stream::NeonStream;
-    use std::{io::ErrorKind, net::SocketAddr, thread, time::Duration};
+    use std::{net::SocketAddr, thread, time::Duration};
 
     //Start a server and exit when the first connection spawns
     pub fn handshake() {
@@ -428,7 +428,7 @@ pub mod duplex {
     use crate::core::channel::MAX_PACKET_SIZE;
     use crate::listener::NeonListener;
     use crate::stream::NeonStream;
-    use std::{io::ErrorKind, net::SocketAddr, thread, time::Duration};
+    use std::{net::SocketAddr, thread, time::Duration};
 
     //Start a server and exit when the first connection spawns
     pub fn handshake() {
@@ -874,7 +874,7 @@ pub mod duplex {
         let in_addr = "127.0.0.1:9001".parse::<SocketAddr>().unwrap();
 
         let target = "127.0.0.1:8129".parse::<SocketAddr>().unwrap();
-        let client = NeonStream::duplex(out_addr,in_addr, 4, Duration::from_millis(100), target).unwrap();
+        let _client = NeonStream::duplex(out_addr,in_addr, 4, Duration::from_millis(100), target).unwrap();
         //idle here for a while
         thread::sleep(Duration::from_secs(3));
         assert!(handle.join().is_ok())

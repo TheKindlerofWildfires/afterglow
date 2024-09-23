@@ -18,11 +18,16 @@ pub mod connection;
 
 */
 
-//Known issues: 
-//spin heat is unknown
-//congestion isn't tested
-//drop isn't enabled
-//Discovery loop when drop happens possible -> timeout 
-//keep alive spiral when lots of loss in multi packet (is this drop related?, did we timeout)
-//not fully tested with mass loss 
+/*
+Known issues: 
+    drop isn't enabled 
+    handshake can loop around discovery 
+    test for double server is flawed (timing dependant)
+    dropping certain acks can cause spinning, probably when drop happens
+
+Unknown issues:
+    spin heat is unknown
+    congestion isn't tested (mimic is hard)
+
+*/
 

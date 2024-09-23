@@ -216,7 +216,7 @@ impl SendBuffer {
     }
 
     //To clean up when ready
-    pub fn drop(&mut self) -> HashMap<MessageNumber, Vec<SequenceNumber>> {
+    pub fn release_drops(&mut self) -> HashMap<MessageNumber, Vec<SequenceNumber>> {
         let out = self.drops.clone();
         self.drops.clear();
         out

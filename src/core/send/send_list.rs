@@ -10,11 +10,11 @@ use crate::{
     utils::{MessageNumber, SequenceNumber, SequenceRange},
 };
 
-use super::send_buffer::SendBuffer;
+use super::{send_buffer::SendBuffer, send_queue::NeonPoll};
 
 pub struct SendList {
     connections: HashMap<u16, SendBacker>,
-    poll: Arc<(Condvar, Arc<Mutex<Vec<u16>>>)>,
+    poll: Arc<NeonPoll>,
 }
 #[derive(Debug)]
 struct SendBacker {
@@ -32,16 +32,12 @@ impl Default for SendList {
 impl SendList {
     pub fn new() -> Self {
         let connections = HashMap::new();
-        let waiting_sockets = Arc::new(Mutex::new(Vec::new()));
-        let work_condition = Condvar::new();
-        let poll = Arc::new((work_condition, waiting_sockets));
+        let sockets = Arc::new(Mutex::new(Vec::new()));
+        let cond = Condvar::new();
+        let poll = Arc::new(NeonPoll{cond,sockets});
         Self { connections, poll }
     }
-    pub fn register_connection(
-        &mut self,
-        socket_id: u16,
-        self_isn: SequenceNumber,
-    ) {
+    pub fn register_connection(&mut self, socket_id: u16, self_isn: SequenceNumber) {
         let data_buffer = SendBuffer::new(self_isn);
         let loss_buffer = LossBuffer::new();
         let updates = BinaryHeap::new();
@@ -74,27 +70,22 @@ impl SendList {
     }
     //Wrapper for updating time
     pub fn update(&mut self, socket_id: u16, cnt: usize, delay: Duration) {
-        match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                (0..cnt).for_each(|i| {
-                    connection
-                        .updates
-                        .push(SystemTime::now() + delay * (i + 1) as u32);
-                });
-                //This socket is now waiting to be worked
-                if let Ok(mut waiting) = self.poll.1.lock() {
-                    (0..cnt).for_each(|_|{
-                        waiting.push(socket_id)
-                    });
-                };
-                self.poll.0.notify_all();
-            }
-            None => {}
+        if let Some(connection) = self.connections.get_mut(&socket_id) {
+            (0..cnt).for_each(|i| {
+                connection
+                    .updates
+                    .push(SystemTime::now() + delay * (i + 1) as u32);
+            });
+            //This socket is now waiting to be worked
+            if let Ok(mut waiting) = self.poll.sockets.lock() {
+                (0..cnt).for_each(|_| waiting.push(socket_id));
+            };
+            self.poll.cond.notify_all();
         }
     }
     pub fn drops(&mut self, socket_id: u16) -> HashMap<MessageNumber, Vec<SequenceNumber>> {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => connection.data_buffer.drop(),
+            Some(connection) => connection.data_buffer.release_drops(),
             None => HashMap::new(),
         }
     }
@@ -128,9 +119,7 @@ impl SendList {
     }
     pub fn out_of_sequence(&mut self, socket_id: u16, ack_no: SequenceNumber) -> bool {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                connection.data_buffer.last_seq() < ack_no
-            },
+            Some(connection) => connection.data_buffer.last_seq() < ack_no,
             None => false,
         }
     }
@@ -158,7 +147,7 @@ impl SendList {
     }
 
     //Can't lock here, need to keep this open
-    pub fn poll(&self) -> Arc<(Condvar, Arc<Mutex<Vec<u16>>>)> {
+    pub fn poll(&self) -> Arc<NeonPoll> {
         self.poll.clone()
     }
     pub fn next_time(&mut self) -> Option<(u16, Duration)> {
@@ -203,7 +192,7 @@ impl SendList {
         match self.connections.get_mut(&socket_id) {
             Some(connection) => {
                 //Remove the first count of this socket from the queue
-                if let Ok(mut waiting) = self.poll.1.lock() {
+                if let Ok(mut waiting) = self.poll.sockets.lock() {
                     if let Some(pos) = waiting.iter().position(|&x| x == socket_id) {
                         waiting.remove(pos);
                     }
@@ -220,25 +209,26 @@ impl SendList {
         }
     }
     pub fn last_seq(&self, socket_id: u16) -> Option<SequenceNumber> {
-        self.connections.get(&socket_id).map(|connection| connection.data_buffer.last_seq())
+        self.connections
+            .get(&socket_id)
+            .map(|connection| connection.data_buffer.last_seq())
     }
 
-    pub fn keep_alive(&mut self,socket_id: u16)->bool{
+    pub fn keep_alive(&mut self, socket_id: u16) -> bool {
         match self.connections.get_mut(&socket_id) {
-            Some(connection) => {
-                match connection.data_buffer.keep_alive(){
-                    Some(seq_range)=>{
-                        connection.loss_buffer.insert(seq_range);
-                        if let Ok(mut ws) = self.poll.1.lock(){
-                            ws.push(socket_id);
-                        }
-                        connection.updates.push(SystemTime::now());
-                        self.poll.0.notify_all();
-                        false
-                    },
-                    None=>true
+            Some(connection) => match connection.data_buffer.keep_alive() {
+                Some(seq_range) => {
+                    connection.loss_buffer.insert(seq_range);
+                    if let Ok(mut ws) = self.poll.sockets.lock() {
+                        ws.push(socket_id);
+                    }
+                    connection.updates.push(SystemTime::now());
+                    self.poll.cond.notify_all();
+                    false
                 }
+                None => true,
             },
             None => false,
-        }    }
+        }
+    }
 }

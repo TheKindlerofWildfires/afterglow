@@ -1,4 +1,3 @@
-
 use crate::utils::{SequenceNumber, SequenceRange};
 
 #[derive(Debug)]
@@ -54,9 +53,7 @@ impl LossBuffer {
     pub fn remove_range(&mut self, remove_range: SequenceRange) {
         let (overlap, mut safe): (Vec<_>, Vec<_>) =
             self.lost_ranges.clone().into_iter().partition(|range| {
-                (range.start < remove_range.start && range.stop > remove_range.start)
-                    || (range.stop > remove_range.stop && range.start < remove_range.start)
-                    || (range.start > remove_range.start && range.stop < remove_range.stop)
+                range.overlaps(remove_range)
             });
         let spliced = overlap
             .iter()
@@ -95,9 +92,7 @@ impl LossBuffer {
 
     pub fn find(&self, find_range: SequenceRange) -> Option<SequenceRange> {
         self.lost_ranges.clone().into_iter().find(|range| {
-            (range.start < find_range.start && range.stop > find_range.start)
-                || (range.stop > find_range.stop && range.start < find_range.start)
-                || (range.start > find_range.start && range.stop < find_range.stop)
+            range.overlaps(find_range)
         })
     }
 
@@ -107,22 +102,21 @@ impl LossBuffer {
         self.lost_ranges.pop()
     }
 
-    pub fn first(&mut self)-> Option<SequenceRange>{
+    pub fn first(&mut self) -> Option<SequenceRange> {
         self.lost_ranges
             .sort_unstable_by(|a, b| a.start.cmp(&b.start).reverse());
         self.lost_ranges.first().copied()
-        
     }
 
     pub fn encode(&self, mss: u16) -> Vec<SequenceRange> {
         let mut count = 0;
         let ranges = self.lost_ranges.iter();
         let mut out_ranges = Vec::new();
-        let limit = mss/2;
+        let limit = mss / 2;
         for range in ranges {
             let cc = 2;
-            if count + cc< limit{
-                count+=cc;
+            if count + cc < limit {
+                count += cc;
                 out_ranges.push(*range)
             }
         }

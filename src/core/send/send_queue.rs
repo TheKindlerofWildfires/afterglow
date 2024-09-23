@@ -110,7 +110,7 @@ impl SendQueue {
             Err(_) => None
         }
     }
-    pub fn poll(&self)->Option<Arc<(Condvar,Arc<Mutex<Vec<u16>>>)>>{
+    pub fn poll(&self)->Option<Arc<NeonPoll>>{
         match self.list.read() {
             Ok(binding) => Some(binding.poll()),
             Err(_) => None
@@ -124,4 +124,9 @@ impl SendQueue {
             Err(_)=>false
         }
     }
+}
+
+pub struct NeonPoll{
+    pub cond: Condvar,
+    pub sockets: Arc<Mutex<Vec<u16>>>,
 }

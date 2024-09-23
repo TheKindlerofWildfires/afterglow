@@ -42,7 +42,6 @@ impl SequenceNumber {
         self.0 ^ 0xf == 0x1
     }
 }
-
 impl Add for SequenceNumber{
     type Output = u16;
 
@@ -50,7 +49,6 @@ impl Add for SequenceNumber{
         (Wrapping(self.0).add(Wrapping(other.0))).0 & Self::MAX
     }
 }
-
 impl AddAssign for SequenceNumber{
     fn add_assign(&mut self, other: Self) {
         self.0 = (Wrapping(self.0).sub(Wrapping(other.0))).0 & Self::MAX;
@@ -64,15 +62,12 @@ impl Debug for SequenceNumber{
             .finish()
     }
 }
-
 impl Sub for SequenceNumber{
     type Output = u16;
-
     fn sub(self, other: Self) -> Self::Output {
         (Wrapping(self.0).sub(Wrapping(other.0))).0 & Self::MAX
     }
 }
-
 impl SubAssign for SequenceNumber{
     fn sub_assign(&mut self, other: Self) {
         self.0 = (Wrapping(self.0).sub(Wrapping(other.0))).0 & Self::MAX;
@@ -101,14 +96,17 @@ impl SequenceRange {
     pub fn contains(&self, number: SequenceNumber) -> bool {
         self.start <= number && self.stop >= number
     }
+    pub fn overlaps(&self, other: Self)->bool{
+        (self.start <= other.start && self.stop >= other.start)
+                || (self.start <= other.stop && self.stop >= other.stop)
+                || (self.start >= other.start && self.stop <= other.stop)
+    }
     pub fn combine_sequences(
         insert_range: SequenceRange,
         ranges: Vec<SequenceRange>,
     ) -> Vec<SequenceRange> {
         let (mut overlap, mut safe): (Vec<_>, Vec<_>) = ranges.into_iter().partition(|range| {
-            (range.start <= insert_range.start && range.stop >= insert_range.start)
-                || (range.start <= insert_range.stop && range.stop >= insert_range.stop)
-                || (range.start >= insert_range.start && range.stop <= insert_range.stop)
+            range.overlaps(insert_range)
         });
         overlap.push(insert_range);
         //sort the overlaps

@@ -65,7 +65,6 @@ impl RecvList {
             //loss handling
             if let Some(skip) = skip_range {
                 connection.loss_buffer.insert(skip);
-                dbg!(&connection.loss_buffer);
             };
         }
     }

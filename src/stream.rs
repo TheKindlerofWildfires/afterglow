@@ -116,7 +116,7 @@ impl NeonStream {
         let socket_id = self.socket_id;
         //, addr: SocketAddr, data: &[u8], ttl: Duration, order: bool
         match self.core.write() {
-            Ok(core) => core.send_data(socket_id, bytes, ttl, order),
+            Ok(mut core) => core.send_data(socket_id, bytes, ttl, order),
             Err(_) => Err(Error::new(ErrorKind::Interrupted, "Poisoned")),
         }
     }

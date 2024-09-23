@@ -107,8 +107,8 @@ impl NeonSocket {
         };
         #[cfg(feature = "drop_send")]
         {
-            if SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            if std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_millis()
                 % 2
@@ -117,17 +117,7 @@ impl NeonSocket {
                 socket.send_to(&packet.serialize(), addr)
             } else {
 
-                match &packet {
-                    Packet::Control(ctrl) => {
-                        socket.send_to(&packet.serialize(), addr)
-                    }
-
-                    Packet::Data(data) => {
-                        dbg!("SEND Drop");
-
-                        Err(Error::new(ErrorKind::Other, "-_-".to_string()))
-                    }
-                }
+                Err(Error::new(std::io::ErrorKind::Other, "-_-".to_string()))
             }
         }
         #[cfg(not(feature = "drop_send"))]
@@ -151,8 +141,8 @@ impl NeonSocket {
         *addr = recv_addr;
         #[cfg(feature = "drop_recv")]
         {
-            if SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            if std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_millis()
                 % 2
@@ -160,16 +150,8 @@ impl NeonSocket {
             {
                 Ok(packet)
             } else {
-                match &packet {
-                    Packet::Control(ctrl) => {
-                        Ok(packet)
-                    }
-                    Packet::Data(data) => {
-                        dbg!("RECV Drop");
+                Err(Error::new(std::io::ErrorKind::Other, "-_-".to_string()))
 
-                        Err(Error::new(ErrorKind::Other, "-_-".to_string()))
-                    }
-                }
             }
         }
         #[cfg(not(feature = "drop_recv"))]

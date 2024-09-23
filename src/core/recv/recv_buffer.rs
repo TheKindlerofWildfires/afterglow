@@ -1,14 +1,22 @@
-use std::{cmp::min, collections::HashMap, time::{Duration, SystemTime}};
+use std::{
+    cmp::{min, Ordering},
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use crate::{
-    congestion::CongestionController, core::SYN_INTERVAL, packet::data::{DataPacket, DataPacketType}, utils::{MessageNumber, SequenceNumber, SequenceRange}, window::ack_window::Window
+    congestion::CongestionController,
+    core::SYN_INTERVAL,
+    packet::data::{DataPacket, DataPacketType},
+    utils::{MessageNumber, SequenceNumber, SequenceRange},
+    window::ack_window::Window,
 };
 
 //This structure only tracks data messages and outputs fully formed packets
 pub struct RecvBuffer {
-    last_msg: MessageNumber, //the last msg popped
-    last_seq: SequenceNumber, //the last seq processed
-    last_ack: SequenceNumber, //the last ack sent
+    last_msg: MessageNumber,         //the last msg popped
+    last_seq: SequenceNumber,        //the last seq processed
+    last_ack: SequenceNumber,        //the last ack sent
     last_ack_square: SequenceNumber, //the last ack square sent
     last_ack_time: SystemTime,
     last_ack_square_time: SystemTime,
@@ -27,7 +35,7 @@ impl RecvBuffer {
         let last_ack_square = last_ack;
         let last_ack_time = SystemTime::now();
         let last_ack_square_time = SystemTime::now();
-        let next_ack_time = SystemTime::now()+SYN_INTERVAL;
+        let next_ack_time = SystemTime::now() + SYN_INTERVAL;
         let congestion = CongestionController::new();
         let ack_window = Window::new(Duration::from_millis(2000));
         Self {
@@ -40,7 +48,7 @@ impl RecvBuffer {
             last_ack_square_time,
             next_ack_time,
             ack_window,
-            congestion
+            congestion,
         }
     }
 
@@ -64,9 +72,9 @@ impl RecvBuffer {
 
         //put the data into the list
         match self.blocks.get_mut(&msg_no) {
-            //Append to existing messages
+            //Append to existing messages (if not already in list)
             Some(recv_block) => {
-                recv_block.data.push(packet);
+                recv_block.push(packet);
                 recv_block.update_state();
             }
             //Create a new message
@@ -74,7 +82,11 @@ impl RecvBuffer {
                 let state = BlockState::Partial;
                 let _stamp = packet.stamp;
                 let data = vec![packet];
-                let mut recv_block = RecvBlock { _stamp, data, state };
+                let mut recv_block = RecvBlock {
+                    _stamp,
+                    data,
+                    state,
+                };
                 recv_block.update_state();
                 self.blocks.insert(msg_no, recv_block);
             }
@@ -132,91 +144,91 @@ impl RecvBuffer {
     pub fn size(&self) -> usize {
         self.blocks.len()
     }
-    pub fn last_seq(&self)->SequenceNumber{
+    pub fn last_seq(&self) -> SequenceNumber {
         self.last_seq
     }
-    pub fn sent_ack(&mut self,ack_no:SequenceNumber){
-        if ack_no>self.last_ack{
+    pub fn sent_ack(&mut self, ack_no: SequenceNumber) {
+        if ack_no > self.last_ack {
             self.last_ack = ack_no
         }
         self.ack_window.store(ack_no, ack_no)
     }
-    pub fn next_ack(&mut self)->SequenceNumber{
+    pub fn next_ack(&mut self) -> SequenceNumber {
         self.last_seq
     }
-    pub fn ack_square(&mut self, ack_no:SequenceNumber){
+    pub fn ack_square(&mut self, ack_no: SequenceNumber) {
         self.last_ack_square_time = SystemTime::now();
-        if ack_no>self.last_ack_square{
-            self.last_ack_square =  ack_no;
+        if ack_no > self.last_ack_square {
+            self.last_ack_square = ack_no;
         }
         let mut _discard = SequenceNumber::new(0);
         let rtt = self.ack_window.acknowledge(ack_no, &mut _discard);
         self.congestion.update_rtt(rtt.as_millis() as u16);
     }
-    pub fn should_ack(&mut self,proposed_ack: SequenceNumber)->Option<(SequenceNumber,SequenceNumber)>{
+    pub fn should_ack(
+        &mut self,
+        proposed_ack: SequenceNumber,
+    ) -> Option<(SequenceNumber, SequenceNumber)> {
         let should_ack = match self.next_ack_time.elapsed() {
-            Ok(_) => {
-                true
-            }
-            Err(_) => {
-                self.congestion.should_ack()
-            }
+            Ok(_) => true,
+            Err(_) => self.congestion.should_ack(),
         };
         //If the time is wrong don't ack
-        if !should_ack{
+        if !should_ack {
             return None;
         }
         //if we've confirmed this ack don't send it
-        if proposed_ack==self.last_ack_square{
+        if proposed_ack == self.last_ack_square {
             return None;
         }
 
-
         //If this is a new ack or the last ack timed out
-        if proposed_ack>self.last_ack{
-            self.last_ack = proposed_ack;
-        }else if proposed_ack==self.last_ack{
-            let ack_timeout = match self.last_ack_time.elapsed(){
-                Ok(dur)=>dur<self.congestion.long_poll(),
-                Err(_)=>false 
-            };
-            if !ack_timeout{
-                return None
-            }
-        }else{
-            return None
+        match proposed_ack.cmp(&self.last_ack){
+            Ordering::Less => return None,
+            Ordering::Equal => {
+                let ack_timeout = match self.last_ack_time.elapsed() {
+                    Ok(dur) => dur < self.congestion.long_poll(),
+                    Err(_) => false,
+                };
+                if !ack_timeout {
+                    return None;
+                }
+            },
+            Ordering::Greater => self.last_ack = proposed_ack,
         }
-        if self.last_ack>self.last_ack_square{
-            self.next_ack_time = SystemTime::now()+self.congestion.next_ack();
-            return Some((proposed_ack,self.last_seq))
+        if self.last_ack > self.last_ack_square {
+            self.next_ack_time = SystemTime::now() + self.congestion.next_ack();
+            return Some((proposed_ack, self.last_seq));
         }
         None
     }
-    pub fn loss(&mut self, loss_ranges: Vec<SequenceRange>){
-        let loss_start = loss_ranges.iter().fold(SequenceNumber::MAX_SEQ_NO, |acc, range|{
-            min(range.start,acc)
-        });
+    pub fn loss(&mut self, loss_ranges: Vec<SequenceRange>) {
+        let loss_start = loss_ranges
+            .iter()
+            .fold(SequenceNumber::MAX_SEQ_NO, |acc, range| {
+                min(range.start, acc)
+            });
         self.congestion.on_loss(loss_start);
     }
-    pub fn delay(&self)->Duration{
+    pub fn delay(&self) -> Duration {
         self.congestion.next_time()
     }
-    pub fn on_pkt(&mut self){
+    pub fn on_pkt(&mut self) {
         self.congestion.inc_pkt_cnt();
     }
-    pub fn rtt(&self)->(Duration,Duration){
+    pub fn rtt(&self) -> (Duration, Duration) {
         self.congestion.rtt()
     }
-    pub fn update_rtt(&mut self, rtt: u16){
+    pub fn update_rtt(&mut self, rtt: u16) {
         self.congestion.update_rtt(rtt)
     }
-    pub fn update_recv_rate(&mut self, rate: u16){
+    pub fn update_recv_rate(&mut self, rate: u16) {
         self.congestion.update_recv_rate(rate)
     }
-    pub fn update_bandwidth(&mut self, bw: u16){
+    pub fn update_bandwidth(&mut self, bw: u16) {
         self.congestion.update_bandwidth(bw)
     }
-    pub fn on_ack(&mut self, ack_no:SequenceNumber){
+    pub fn on_ack(&mut self, ack_no: SequenceNumber) {
         self.congestion.on_ack(ack_no);
     }
 }
@@ -229,6 +241,16 @@ pub struct RecvBlock {
 }
 
 impl RecvBlock {
+    pub fn push(&mut self, insert_data: DataPacket) {
+        match self
+            .data
+            .iter()
+            .find(|data| data.seq_no == insert_data.seq_no)
+        {
+            Some(_) => {}
+            None => self.data.push(insert_data),
+        }
+    }
     pub fn update_state(&mut self) {
         //if this is solo it's complete
         self.state = if self.data[0].element == DataPacketType::Solo {
@@ -270,7 +292,6 @@ impl RecvBlock {
         });
         DataPacket::decompress(&raw_bytes)
     }
-
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockState {

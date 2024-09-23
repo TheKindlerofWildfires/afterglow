@@ -96,6 +96,9 @@ impl NeonConnection {
             Err(_) => {false} //the time is just in the future
         }
     }
+    pub fn sent_packet(&mut self){
+        self.last_update = SystemTime::now();
+    }
     
     pub fn create_ack(
         &mut self,
@@ -188,7 +191,7 @@ impl NeonConnection {
         self.first_update = stamp;
         self.partner_id = partner_id;
         self.status = NeonStatus::Negotiating;
-        self.partner_out_addr = SocketAddr::new(self.partner_out_addr.ip(), port);;
+        self.partner_out_addr = SocketAddr::new(self.partner_out_addr.ip(), port);
     }
     pub fn partner_id(&self) -> u16 {
         self.partner_id
